@@ -107,8 +107,21 @@
       <div id="shop-panel">
         <h2>Магазин</h2>
         <div id="money-display">Деньги: $<span id="money-value">500</span></div>
-        <div id="shop-items"></div>
+        <button id="btn-open-shop">МАГАЗИН [B]</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Модальный магазин -->
+  <div id="shop-modal">
+    <div id="shop-box">
+      <div id="shop-header">
+        <span id="shop-title">АРСЕНАЛ</span>
+        <span id="shop-money">$500</span>
+        <button id="btn-close-shop">ЗАКРЫТЬ [ESC]</button>
+      </div>
+      <div id="shop-grid"></div>
+      <div id="shop-hint">Покупать можно во время матча между выстрелами</div>
     </div>
   </div>
 
@@ -135,6 +148,7 @@
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
   <script src="src/utils/Network.js"></script>
   <script src="src/utils/InputHandler.js"></script>
+  <script src="src/utils/Sound.js"></script>
   <script src="src/objects/Sky.js"></script>
   <script src="src/objects/Tank.js"></script>
   <script src="src/objects/Terrain.js"></script>

@@ -3,7 +3,10 @@
  * Сервер — авторитетный расчет, клиенту приходят готовые высоты
  */
 
-const { MAP_WIDTH, GROUND_MIN_Y, GROUND_MAX_Y, PHYSICS } = require('./constants');
+const { MAP_WIDTH, MAP_HEIGHT, GROUND_MIN_Y, GROUND_MAX_Y, PHYSICS } = require('./constants');
+
+// Поверхность не опускается ниже: танк не должен проваливаться за нижнюю кромку
+const MAX_SURFACE_Y = MAP_HEIGHT - 8;
 
 /**
  * Генерация ландшафта: наложение синусоид + шум по seed
@@ -92,7 +95,7 @@ function applyExplosion(heights, cx, cy, radius) {
       const craterBottomY = cy + dy;
 
       const oldHeight = heights[x];
-      const newHeight = Math.max(oldHeight, craterBottomY);
+      const newHeight = Math.min(Math.max(oldHeight, craterBottomY), MAX_SURFACE_Y);
 
       heights[x] = newHeight;
       terrainDiff += Math.max(0, newHeight - oldHeight);
@@ -162,8 +165,10 @@ function crumbleTerrain(heights, maxSlope = PHYSICS.crumbleMaxSlope, passes = PH
   }
 
   // Осыпавшаяся земля не может висеть выше минимального уровня
+  // и проваливаться ниже нижней кромки карты
   for (let x = 0; x < MAP_WIDTH; x++) {
     if (heights[x] < GROUND_MIN_Y) heights[x] = GROUND_MIN_Y;
+    if (heights[x] > MAX_SURFACE_Y) heights[x] = MAX_SURFACE_Y;
   }
 
   return totalChanged;

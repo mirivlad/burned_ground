@@ -17,7 +17,8 @@ const STATE_FILE = path.join(__dirname, '.bot-state.json');
 const state = fs.existsSync(STATE_FILE) ? JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) : {};
 
 const socket = io('http://localhost:3000', { reconnection: false });
-const log = (...a) => console.log(`[${name}]`, ...a);
+const t0 = Date.now();
+const log = (...a) => console.log(`+${((Date.now() - t0) / 1000).toFixed(2)}s [${name}]`, ...a);
 
 socket.on('connect', () => {
   log('connected');

@@ -15,6 +15,17 @@
       radius: 15,
       color: '#ffffff'
     },
+    smoke_tracer: {
+      id: 'smoke_tracer',
+      name: 'Smoke Tracer',
+      price: 25,
+      packSize: 5,                    // продается пачкой
+      infinite: false,
+      damage: 0,
+      radius: 4,
+      effect: 'smoke',                // без урона и кратера: пристрелка
+      color: '#cccccc'
+    },
     heavy_shot: {
       id: 'heavy_shot',
       name: 'Heavy Shot',

@@ -914,6 +914,12 @@ class Room {
 
     const impact = trajectory[trajectory.length - 1];
 
+    // Снаряд в полете: резервируем фазу сразу (нельзя стрелять дважды),
+    // а попадание применяем через реальное время полета — клиенты увидят
+    // взрыв ровно тогда, когда снаряд долетит
+    const flightMs = Math.min(trajectory.length * 16.67, 8000);
+    const missedMap = impact.y > 7000 || impact.x < 0 || impact.x >= MAP_WIDTH;
+
     this.emit('shot', {
       playerId,
       angle,
@@ -922,58 +928,62 @@ class Room {
       startX,
       startY,
       weaponId,
-      trajectoryDurationMs: trajectory.length * 16.67
+      trajectoryDurationMs: flightMs
     });
-
-    if (impact.y > 7000 || impact.x < 0 || impact.x >= MAP_WIDTH) {
-      this.turnPhase = 'resolving';
-      this.setTimer('resolve', () => {
-        if (this.phase === 'playing' && !this.destroyed) this.endTurn();
-      }, Math.min(trajectory.length * 16.67 + 500, 6000));
-      return {};
-    }
-
-    const impactX = Math.max(0, Math.min(MAP_WIDTH - 1, impact.x));
-    const impactY = impact.y;
-
-    // Урон от точки взрыва
-    const damages = [];
-    for (const otherTank of this.tanks) {
-      const other = this.players[otherTank.playerId];
-      if (!other || !other.isAlive) continue;
-
-      const dx = otherTank.x - impactX;
-      const dy = (otherTank.y - PHYSICS.tankHeight / 2) - impactY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      const effectiveRadius = weapon.radius + PHYSICS.tankWidth / 2;
-
-      const damage = calculateExplosionDamage(dist, effectiveRadius, weapon.damage);
-      if (damage > 0) damages.push({ playerId: otherTank.playerId, damage });
-    }
-
-    let terrainDiff = 0;
-    if (weapon.effect === 'add_earth') {
-      terrainDiff = -applyDirtBall(this.terrain, impactX, impactY, weapon.radius);
-      crumbleTerrain(this.terrain);
-    } else {
-      terrainDiff = applyExplosion(this.terrain, impactX, impactY, weapon.radius);
-      crumbleTerrain(this.terrain);
-      this.addMoney(playerId, terrainDiff, 'terrain');
-    }
-
-    this.emit('explosion', {
-      x: impactX, y: impactY, radius: weapon.radius, weaponId,
-      damages, terrainDiff: Math.round(terrainDiff)
-    });
-
-    this.emit('terrain_update', { heights: this.terrain, crumbled: true });
-
-    for (const { playerId: hitId, damage } of damages) {
-      this.damagePlayer(hitId, damage, playerId, 'explosion');
-    }
 
     this.turnPhase = 'resolving';
-    this.runStabilization(trajectory.length * 16.67);
+
+    this.setTimer('resolve', () => {
+      if (this.destroyed || this.phase !== 'playing') return;
+
+      if (missedMap) {
+        this.endTurn();
+        return;
+      }
+
+      const impactX = Math.max(0, Math.min(MAP_WIDTH - 1, impact.x));
+      const impactY = impact.y;
+
+      // Урон от точки взрыва
+      const damages = [];
+      for (const otherTank of this.tanks) {
+        const other = this.players[otherTank.playerId];
+        if (!other || !other.isAlive) continue;
+
+        const dx = otherTank.x - impactX;
+        const dy = (otherTank.y - PHYSICS.tankHeight / 2) - impactY;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const effectiveRadius = weapon.radius + PHYSICS.tankWidth / 2;
+
+        const damage = calculateExplosionDamage(dist, effectiveRadius, weapon.damage);
+        if (damage > 0) damages.push({ playerId: otherTank.playerId, damage });
+      }
+
+      let terrainDiff = 0;
+      if (weapon.effect === 'add_earth') {
+        terrainDiff = -applyDirtBall(this.terrain, impactX, impactY, weapon.radius);
+        crumbleTerrain(this.terrain);
+      } else if (weapon.effect === 'smoke') {
+        // Дымовая пристрелка: без кратера и урона
+      } else {
+        terrainDiff = applyExplosion(this.terrain, impactX, impactY, weapon.radius);
+        crumbleTerrain(this.terrain);
+        this.addMoney(playerId, terrainDiff, 'terrain');
+      }
+
+      this.emit('explosion', {
+        x: impactX, y: impactY, radius: weapon.radius, weaponId,
+        damages, terrainDiff: Math.round(terrainDiff)
+      });
+
+      this.emit('terrain_update', { heights: this.terrain, crumbled: true });
+
+      for (const { playerId: hitId, damage } of damages) {
+        this.damagePlayer(hitId, damage, playerId, 'explosion');
+      }
+
+      this.runStabilization(0);
+    }, flightMs);
 
     return {};
   }
@@ -1044,7 +1054,8 @@ class Room {
     if (weapon.price > p.money) return;
 
     p.money -= weapon.price;
-    p.inventory[weaponId] = (p.inventory[weaponId] || 0) + 1;
+    // Некоторые снаряды продаются пачками (Smoke Tracer)
+    p.inventory[weaponId] = (p.inventory[weaponId] || 0) + (weapon.packSize || 1);
 
     this.emit('inventory_update', { playerId, inventory: p.inventory, activeWeaponId: p.activeWeaponId });
     this.emit('money_update', { playerId, amount: -weapon.price, reason: `buy_${weaponId}` });

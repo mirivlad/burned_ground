@@ -62,7 +62,10 @@ class UIScene extends Phaser.Scene {
     this.timerEl = document.getElementById('timer');
     this.moneyValue = document.getElementById('money-value');
     this.inventoryList = document.getElementById('inventory-list');
-    this.shopItems = document.getElementById('shop-items');
+    this.btnOpenShop = document.getElementById('btn-open-shop');
+    this.shopModal = document.getElementById('shop-modal');
+    this.shopGrid = document.getElementById('shop-grid');
+    this.shopMoney = document.getElementById('shop-money');
     this.sidebarEl = document.getElementById('sidebar');
     this.messagePanel = document.getElementById('message-panel');
     this.messageText = document.getElementById('message-text');
@@ -221,13 +224,37 @@ class UIScene extends Phaser.Scene {
       window.network.startMatch();
     });
 
-    // ==== Выстрел ====
+    // ==== Магазин (модальное окно) ====
+    this.btnOpenShop?.addEventListener('click', () => this.openShop());
+    document.getElementById('btn-close-shop')?.addEventListener('click', () => this.closeShop());
+    this.shopModal?.addEventListener('click', (e) => {
+      if (e.target === this.shopModal) this.closeShop();
+    });
+
+    // Горячие клавиши магазина (не срабатывают в полях ввода)
+    document.addEventListener('keydown', (e) => {
+      if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+      if (e.code === 'KeyB') {
+        this.shopModal?.classList.contains('visible') ? this.closeShop() : this.openShop();
+      } else if (e.code === 'Escape') {
+        this.closeShop();
+      }
+    });
+
+    // ==== Выстрел и вращение ствола ====
     window.inputHandler.setOnFireCallback((angle, power) => {
       if (this.isMyTurn) {
         window.network.fire(angle, power, this.getActiveWeapon());
       } else if (this.currentPlayerId) {
         this.showMessage('Сейчас не ваш ход');
       }
+    });
+
+    window.inputHandler.setOnAngleChangeCallback((angle) => {
+      const gs = this.scene.get('GameScene');
+      const myId = window.network.playerId;
+      const tank = gs && myId ? gs.tanks[myId] : null;
+      if (tank) tank.setAngle(angle);
     });
   }
 
@@ -690,37 +717,76 @@ class UIScene extends Phaser.Scene {
   // МАГАЗИН / ИНВЕНТАРЬ / СПИСКИ
   // ============================================
 
+  openShop() {
+    if (!this.shopModal) return;
+    if (window.network.isSpectator()) return;
+    this.shopModal.classList.add('visible');
+    this.updateShopDisplay();
+    window.sound?.click();
+  }
+
+  closeShop() {
+    this.shopModal?.classList.remove('visible');
+  }
+
   setupShop() {
-    if (!this.shopItems) return;
+    if (!this.shopGrid) return;
     if (window.network.isSpectator()) return;
 
     const weapons = Object.values(window.WEAPONS || {}).filter(w => !w.infinite);
 
-    this.shopItems.innerHTML = weapons.map(weapon => `
-      <div class="shop-item ${weapon.price > this.money ? 'too-expensive' : ''}" data-weapon="${weapon.id}">
-        <div class="shop-item-header">
-          <span class="shop-item-name">${weapon.name}</span>
-          <span class="shop-item-price">$${weapon.price}</span>
-        </div>
-        <div class="shop-item-desc">
-          ${weapon.effect === 'add_earth' ? 'создает холм земли' : `Урон: ${weapon.damage}, Радиус: ${weapon.radius}`}
-        </div>
-      </div>
-    `).join('');
+    this.shopGrid.innerHTML = weapons.map(weapon => {
+      const pack = weapon.packSize ? `<span class="card-pack">×${weapon.packSize} за покупку</span>` : '';
+      const desc = weapon.effect === 'add_earth'
+        ? 'Создает холм земли: закопать себя или поставить стену врагу'
+        : weapon.effect === 'smoke'
+          ? 'Пристрелочный дым: без урона и кратера, след остается до следующего выстрела'
+          : `Урон: ${weapon.damage} · Радиус: ${weapon.radius}`;
 
-    this.shopItems.querySelectorAll('.shop-item').forEach(item => {
-      item.addEventListener('click', () => {
-        if (item.classList.contains('too-expensive')) return;
-        window.network.buyWeapon(item.dataset.weapon);
+      return `
+        <div class="shop-card" data-weapon="${weapon.id}">
+          <div class="card-top">
+            <span class="card-name">${weapon.name} ${pack}</span>
+            <span class="card-price">$${weapon.price}</span>
+          </div>
+          <div class="card-desc">${desc}</div>
+          <div class="card-owned" data-owned="${weapon.id}">в наличии: 0</div>
+          <button class="card-buy" data-buy="${weapon.id}">КУПИТЬ</button>
+        </div>
+      `;
+    }).join('');
+
+    this.shopGrid.querySelectorAll('.card-buy').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const weapon = window.WEAPONS[btn.dataset.buy];
+        if (weapon && weapon.price <= this.money) {
+          window.network.buyWeapon(btn.dataset.buy);
+          window.sound?.coin();
+        }
       });
+    });
+
+    this.updateShopDisplay();
+  }
+
+  updateShopDisplay() {
+    if (!this.shopGrid) return;
+
+    if (this.shopMoney) this.shopMoney.textContent = '$' + this.money;
+
+    this.shopGrid.querySelectorAll('.shop-card').forEach(card => {
+      const weapon = window.WEAPONS[card.dataset.weapon];
+      if (!weapon) return;
+      const owned = this.inventory[weapon.id] || 0;
+      card.classList.toggle('too-expensive', weapon.price > this.money);
+
+      const ownedEl = card.querySelector(`[data-owned="${weapon.id}"]`);
+      if (ownedEl) ownedEl.textContent = `в наличии: ${owned}`;
     });
   }
 
   setupShopRefresh() {
-    this.shopItems?.querySelectorAll('.shop-item').forEach(item => {
-      const weapon = window.WEAPONS[item.dataset.weapon];
-      if (weapon) item.classList.toggle('too-expensive', weapon.price > this.money);
-    });
+    this.updateShopDisplay();
   }
 
   updateInventoryDisplay() {

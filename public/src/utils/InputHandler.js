@@ -98,6 +98,10 @@ class InputHandler {
   setAngle(angle) {
     this.angle = angle;
     this.updateAngleDisplay();
+    // Вращаем ствол сразу (восстановление угла в начале хода)
+    if (this.onAngleChangeCallback) {
+      this.onAngleChangeCallback(this.angle);
+    }
   }
 
   setPower(power) {

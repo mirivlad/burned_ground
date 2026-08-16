@@ -50,7 +50,59 @@ class GameScene extends Phaser.Scene {
 
   // Тема неба раунда выводится из seed ландшафта
   themeForSeed(seed) {
-    return ['day', 'sunset', 'night'][Math.abs(seed|0) % 3];
+    return ['day', 'sunset', 'night'][Math.abs(seed | 0) % 3];
+  }
+
+  /**
+   * Индикатор ветра: стрелка вверху в центре канваса.
+   * Длина пропорциональна силе, направление — куда сносит снаряды.
+   */
+  drawWindIndicator(wind) {
+    if (this.windGfx) this.windGfx.destroy();
+    if (this.windText) this.windText.destroy();
+
+    const W = window.CONSTANTS.MAP_WIDTH;
+    const maxWind = window.CONSTANTS.GAME.maxWind;
+    const cx = W / 2;
+    const y = 26;
+    const len = Math.round((Math.abs(wind) / maxWind) * 55);
+
+    this.windGfx = this.add.graphics();
+    this.windGfx.fillStyle(0x000000, 0.45);
+    this.windGfx.fillRect(cx - 100, y - 14, 200, 28);
+
+    if (Math.abs(wind) < 0.05) {
+      // Штиль — точка
+      this.windGfx.fillStyle(0xffffff, 0.9);
+      this.windGfx.fillCircle(cx, y, 3);
+    } else {
+      const dir = wind > 0 ? 1 : -1;   // ветер > 0 сносит вправо
+      const color = Math.abs(wind) > maxWind * 0.66 ? 0xff5555 : 0xffffff;
+
+      this.windGfx.lineStyle(3, color, 1);
+      this.windGfx.beginPath();
+      this.windGfx.moveTo(cx - dir * len, y);
+      this.windGfx.lineTo(cx + dir * len, y);
+      this.windGfx.strokePath();
+
+      // Наконечник стрелки
+      this.windGfx.beginPath();
+      this.windGfx.moveTo(cx + dir * len, y);
+      this.windGfx.lineTo(cx + dir * (len - 8), y - 5);
+      this.windGfx.lineTo(cx + dir * (len - 8), y + 5);
+      this.windGfx.closePath();
+      this.windGfx.fillStyle(color, 1);
+      this.windGfx.fillPath();
+    }
+
+    this.windText = this.add.text(cx, y, `WIND ${wind.toFixed(1)}`, {
+      fontFamily: 'Courier New',
+      fontSize: '13px',
+      color: '#ffffff',
+      stroke: '#000000',
+      strokeThickness: 3
+    });
+    this.windText.setOrigin(0.5);
   }
 
   buildWorld({ terrainSeed, heights, tanks, players }) {
@@ -62,6 +114,7 @@ class GameScene extends Phaser.Scene {
 
     this.sky = new window.Sky(this, this.themeForSeed(terrainSeed || 1), terrainSeed || 1);
     this.terrain = new window.Terrain(this, heights || []);
+    this.drawWindIndicator(this.wind);
 
     (tanks || []).forEach(tankData => {
       this.spawnTank(tankData.playerId, tankData.x, tankData.y);
@@ -93,7 +146,10 @@ class GameScene extends Phaser.Scene {
   }
 
   handleTurnStart(data) {
-    if (data.wind !== undefined) this.wind = data.wind;
+    if (data.wind !== undefined) {
+      this.wind = data.wind;
+      this.drawWindIndicator(this.wind);
+    }
 
     this.currentPlayerId = data.playerId;
 
@@ -121,33 +177,57 @@ class GameScene extends Phaser.Scene {
     const colorNum = Phaser.Display.Color.HexStringToColor(weapon.color || '#ffffff').color;
 
     const projectile = this.add.circle(trajectory[0].x, trajectory[0].y, 3, colorNum);
+    projectile.setPosition(trajectory[0].x, trajectory[0].y);
 
-    const duration = trajectory.length * 16.67;
+    // Твин с массивом точек ненадежен в Phaser 3.60 — анимируем вручную:
+    // 1 точка траектории = 1 тик физики (16.67мс), снаряд точно следует кривой
+    // и останавливается в точке падения (не пролетает сквозь грунт).
+    const isSmoke = weaponId === 'smoke_tracer';
 
-    this.tweens.add({
-      targets: projectile,
-      x: trajectory.map(p => p.x),
-      y: trajectory.map(p => p.y),
-      duration,
-      ease: 'Linear',
-      onComplete: () => projectile.destroy()
-    });
+    if (isSmoke && this.aimTrail) this.aimTrail.destroy();
+    if (isSmoke) this.aimTrail = this.add.graphics();
+    if (!isSmoke && this.aimTrail) {
+      // Боевой выстрел убирает пристрелочный след
+      this.aimTrail.destroy();
+      this.aimTrail = null;
+    }
 
-    // След снаряда
-    const trail = this.add.graphics();
-    let ti = 0;
+    const trail = isSmoke ? this.aimTrail : this.add.graphics();
+    let idx = 0;
+
     this.time.addEvent({
-      delay: 16,
+      delay: 16.67,
       repeat: trajectory.length,
       callback: () => {
-        if (ti < trajectory.length) {
-          trail.fillStyle(0xffffff, 0.25);
-          trail.fillCircle(trajectory[ti].x, trajectory[ti].y, 1);
-          ti++;
+        idx++;
+        if (idx < trajectory.length) {
+          projectile.setPosition(trajectory[idx].x, trajectory[idx].y);
+          if (!isSmoke) {
+            trail.fillStyle(0xffffff, 0.25);
+            trail.fillCircle(trajectory[idx].x, trajectory[idx].y, 1);
+          } else if (idx % 5 === 0) {
+            // Дымная дорожка остается до следующего выстрела — пристрелка
+            trail.fillStyle(0xcccccc, 0.85);
+            trail.fillCircle(trajectory[idx].x, trajectory[idx].y, 2);
+          }
+        } else {
+          // Точка падения
+          const last = trajectory[trajectory.length - 1];
+          projectile.setPosition(last.x, last.y);
+          if (isSmoke) {
+            trail.fillStyle(0xffffff, 0.9);
+            trail.fillCircle(last.x, last.y, 3);
+          }
+          projectile.destroy();
         }
       }
     });
-    this.time.delayedCall(duration + 1500, () => trail.destroy());
+
+    if (isSmoke) {
+      window.sound.smoke();
+    } else {
+      window.sound.shot();
+    }
   }
 
   handleExplosion(data) {
@@ -220,6 +300,8 @@ class GameScene extends Phaser.Scene {
         this.showFloatingText(tank.x, tank.y - 40, `-${damage}`, '#ff4444');
       }
     });
+
+    window.sound.explosion(radius);
   }
 
   spawnDebris(x, y, r, color, count) {
@@ -306,6 +388,7 @@ class GameScene extends Phaser.Scene {
     if (tank) {
       this.showFloatingText(tank.x, tank.y - 30, `ПАДЕНИЕ -${Math.round(data.distance)}px`, '#ffaa00');
     }
+    window.sound.fall(data.distance);
   }
 
   handleDeath(data) {
@@ -323,6 +406,7 @@ class GameScene extends Phaser.Scene {
       delete this.tanks[data.playerId];
     }
     if (this.players[data.playerId]) this.players[data.playerId].isAlive = false;
+    window.sound.explosion(50);
   }
 
   // ==== Вспомогательные ====
@@ -373,6 +457,10 @@ class GameScene extends Phaser.Scene {
       this.sky.destroy();
       this.sky = null;
     }
+
+    if (this.windGfx) { this.windGfx.destroy(); this.windGfx = null; }
+    if (this.windText) { this.windText.destroy(); this.windText = null; }
+    if (this.aimTrail) { this.aimTrail.destroy(); this.aimTrail = null; }
   }
 }
 
