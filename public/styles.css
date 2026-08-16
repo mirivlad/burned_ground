@@ -95,6 +95,13 @@ input[type="text"]::placeholder { color: #3a5a42; text-transform: uppercase; }
 }
 #entry-error { color: #ff5555; }
 
+#profile-line {
+  margin: 8px 0 4px; font-size: 12px; color: #66ff66;
+  text-align: center; letter-spacing: 1px;
+  border: 1px dashed #2d5237; padding: 6px;
+}
+#profile-line .stat { color: #ffd24a; }
+
 #entry-hint { text-align: center; font-size: 10px; color: #3a5a42; margin-top: 12px; letter-spacing: 1px; }
 
 .lobby-label { font-size: 11px; color: #4a7a56; letter-spacing: 2px; margin: 8px 0 6px; }

@@ -28,9 +28,84 @@ class UIScene extends Phaser.Scene {
     this.setupUIElements();
     this.setupNetworkListeners();
     this.setupEventHandlers();
+    this.initAccount();
 
     this.showEntryScreen();
     this.renderColorPicker();
+  }
+
+  // ============================================
+  // АККАУНТ
+  // ============================================
+
+  async initAccount() {
+    const me = await window.network.fetchMe();
+    if (me) this.showProfile(me.user, me.stats);
+  }
+
+  showProfile(user, stats) {
+    if (!this.profileLine) return;
+
+    const s = stats || { matches: 0, wins: 0, kills: 0, earned: 0, winRate: 0 };
+    this.profileLine.classList.remove('hidden');
+    this.profileLine.innerHTML =
+      `<b>${escapeHtml(user.username)}</b> · матчей <span class="stat">${s.matches}</span>` +
+      ` · побед <span class="stat">${s.wins}</span> (${s.winRate}%)` +
+      ` · убийств <span class="stat">${s.kills}</span> · заработано <span class="stat">$${s.earned}</span>`;
+
+    this.btnLogout?.classList.remove('hidden');
+    document.getElementById('btn-login')?.classList.add('hidden');
+    document.getElementById('btn-register')?.classList.add('hidden');
+
+    // Позывной по умолчанию = имя аккаунта
+    if (this.entryName && !this.entryName.value) {
+      this.entryName.value = user.username;
+    }
+  }
+
+  hideProfile() {
+    this.profileLine?.classList.add('hidden');
+    this.btnLogout?.classList.add('hidden');
+    document.getElementById('btn-login')?.classList.remove('hidden');
+    document.getElementById('btn-register')?.classList.remove('hidden');
+  }
+
+  setupAccountHandlers() {
+    const doLogin = async (register) => {
+      const username = this.authUsername?.value.trim();
+      const password = this.authPassword?.value;
+      if (!username || !password) return;
+
+      try {
+        const d = register
+          ? await window.network.register(username, password)
+          : await window.network.login(username, password);
+        this.authPassword.value = '';
+        const me = await window.network.fetchMe();
+        this.showProfile(d.user, me ? me.stats : null);
+        window.sound?.coin();
+        this.showMessage(register ? 'Аккаунт создан' : `С возвращением, ${d.user.username}!`);
+      } catch (e) {
+        window.sound?.click();
+        this.showMessage(e.message);
+      }
+    };
+
+    document.getElementById('btn-login')?.addEventListener('click', () => doLogin(false));
+    document.getElementById('btn-register')?.addEventListener('click', () => doLogin(true));
+
+    this.authPassword?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doLogin(false);
+    });
+    this.authUsername?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') this.authPassword?.focus();
+    });
+
+    this.btnLogout?.addEventListener('click', () => {
+      window.network.setAuth(null, null);
+      this.hideProfile();
+      this.showMessage('Вы вышли из аккаунта');
+    });
   }
 
   setupUIElements() {
@@ -42,6 +117,12 @@ class UIScene extends Phaser.Scene {
     this.entryColors = document.getElementById('entry-colors');
     this.entryReconnect = document.getElementById('entry-reconnect');
     this.entryError = document.getElementById('entry-error');
+
+    // Аккаунт
+    this.authUsername = document.getElementById('auth-username');
+    this.authPassword = document.getElementById('auth-password');
+    this.profileLine = document.getElementById('profile-line');
+    this.btnLogout = document.getElementById('btn-logout');
 
     // Комната
     this.roomScreen = document.getElementById('room-screen');
@@ -165,6 +246,8 @@ class UIScene extends Phaser.Scene {
   }
 
   setupEventHandlers() {
+    this.setupAccountHandlers();
+
     // ==== Вход ====
     document.getElementById('btn-create').addEventListener('click', () => {
       const name = this.entryName.value.trim();

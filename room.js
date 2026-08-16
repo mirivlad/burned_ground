@@ -786,10 +786,10 @@ class Room {
     this.emit('match_end', { finalScores });
 
     // Запись в историю для авторизованных игроков
-    if (this.onMatchEnd) {
+    if (this.onMatchEnd && finalScores.length > 0) {
       const best = finalScores.reduce((a, b) =>
         (b.kills * 1000 + b.totalEarned) > (a.kills * 1000 + a.totalEarned) ? b : a
-      , finalScores[0]);
+      );
       const scores = finalScores.map(s => ({ ...s, won: s === best && !s.isBot }));
       try {
         this.onMatchEnd(this.id, this.config.rounds, scores);

@@ -16,6 +16,21 @@
       <div id="entry-reconnect" class="hidden">ПЫТАЕМСЯ ВЕРНУТЬСЯ В МАТЧ...</div>
       <div id="entry-error" class="hidden"></div>
 
+      <!-- Аккаунт: вход/регистрация или профиль -->
+      <div id="auth-box">
+        <div class="lobby-label">// АККАУНТ (необязательно):</div>
+        <div class="entry-row">
+          <input type="text" id="auth-username" placeholder="ЛОГИН" maxlength="20" autocomplete="username">
+          <input type="password" id="auth-password" placeholder="ПАРОЛЬ" autocomplete="current-password">
+        </div>
+        <div class="entry-row">
+          <button id="btn-login">ВОЙТИ</button>
+          <button id="btn-register">РЕГИСТРАЦИЯ</button>
+          <button id="btn-logout" class="hidden">ВЫЙТИ</button>
+        </div>
+        <div id="profile-line" class="hidden"></div>
+      </div>
+
       <div class="entry-row">
         <input type="text" id="entry-name" placeholder="ПОЗЫВНОЙ" maxlength="20" autocomplete="off">
       </div>

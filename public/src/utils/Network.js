@@ -11,6 +11,8 @@ class Network {
     this.playerId = null;
     this.roomId = null;
     this.playerName = null;
+    this.authToken = localStorage.getItem('bg_token') || null;
+    this.account = null;        // { id, username } если авторизован
     this.eventHandlers = {};
   }
 
@@ -35,7 +37,8 @@ class Network {
   }
 
   connect() {
-    this.socket = io();
+    // Токен аккаунта уходит в handshake: сервер привяжет игрока к профилю
+    this.socket = io({ auth: { token: this.authToken } });
 
     this.socket.on('connect', () => {
       console.log('Подключено к серверу');
@@ -110,6 +113,65 @@ class Network {
       'money_update', 'inventory_update', 'round_end', 'match_end', 'match_reset',
       'error'
     ].forEach(forward);
+  }
+
+  // ==== Аккаунт ====
+
+  async api(path, options = {}) {
+    const res = await fetch(path, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.authToken ? { Authorization: `Bearer ${this.authToken}` } : {}),
+        ...(options.headers || {})
+      }
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Ошибка сервера');
+    return data;
+  }
+
+  async login(username, password) {
+    const d = await this.api('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password })
+    });
+    this.setAuth(d.token, d.user);
+    return d;
+  }
+
+  async register(username, password) {
+    const d = await this.api('/api/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({ username, password })
+    });
+    this.setAuth(d.token, d.user);
+    return d;
+  }
+
+  async fetchMe() {
+    if (!this.authToken) return null;
+    try {
+      const d = await this.api('/api/me');
+      this.account = d.user;
+      return d;
+    } catch {
+      this.setAuth(null, null);
+      return null;
+    }
+  }
+
+  setAuth(token, user) {
+    this.authToken = token;
+    this.account = user;
+    if (token) localStorage.setItem('bg_token', token);
+    else localStorage.removeItem('bg_token');
+
+    // Переподключаем сокет с новым токеном в handshake
+    if (this.socket) {
+      this.socket.auth = { token };
+      this.socket.disconnect().connect();
+    }
   }
 
   // ==== Команды ====
