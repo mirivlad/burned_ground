@@ -1,0 +1,6 @@
+node_modules/
+*.log
+.bot-state.json
+__shots/
+.env
+.DS_Store

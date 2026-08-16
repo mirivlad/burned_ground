@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Burned Ground - Tank Battle</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- ЭКРАН ВХОДА -->
+  <div id="entry-screen">
+    <div id="entry-box">
+      <div id="entry-title">BURNED GROUND</div>
+      <div id="entry-sub">&gt;&gt; АРТИЛЛЕРИЙСКАЯ ДУЭЛЬ &lt;&lt;</div>
+
+      <div id="entry-reconnect" class="hidden">ПЫТАЕМСЯ ВЕРНУТЬСЯ В МАТЧ...</div>
+      <div id="entry-error" class="hidden"></div>
+
+      <div class="entry-row">
+        <input type="text" id="entry-name" placeholder="ПОЗЫВНОЙ" maxlength="20" autocomplete="off">
+      </div>
+
+      <div class="lobby-label">// ЦВЕТ ТАНКА:</div>
+      <div id="entry-colors"></div>
+
+      <div class="entry-row">
+        <button id="btn-create">СОЗДАТЬ ЛОББИ</button>
+      </div>
+
+      <div class="entry-divider">— или присоединиться —</div>
+
+      <div class="entry-row">
+        <input type="text" id="entry-code" placeholder="КОД КОМНАТЫ" maxlength="5" autocomplete="off">
+        <button id="btn-join">ВОЙТИ</button>
+        <button id="btn-spectate">НАБЛЮДАТЬ</button>
+      </div>
+
+      <div id="entry-hint">Создатель настраивает слоты и дает ссылку на вход</div>
+    </div>
+  </div>
+
+  <!-- ЭКРАН КОМНАТЫ (лобби) -->
+  <div id="room-screen">
+    <div id="room-box">
+      <div id="room-header">
+        <span>КОМНАТА <span id="room-code"></span></span>
+        <button id="btn-copy-link" title="Скопировать ссылку">ССЫЛКА</button>
+        <button id="btn-leave-room" title="Покинуть комнату">ВЫЙТИ</button>
+      </div>
+
+      <div id="room-phase-label"></div>
+
+      <div class="lobby-label">// СОСТАВ (слоты):</div>
+      <div id="room-slots"></div>
+
+      <div id="host-controls">
+        <button id="btn-add-human">+ ИГРОК</button>
+        <button id="btn-add-bot">+ БОТ</button>
+        <button id="btn-launch">ЗАПУСК</button>
+        <button id="btn-start">НАЧАТЬ МАТЧ</button>
+      </div>
+
+      <div id="room-status"></div>
+
+      <div class="lobby-label">// ЗРИТЕЛИ:</div>
+      <div id="room-spectators"></div>
+    </div>
+  </div>
+
+  <!-- ИГРОВОЙ ЭКРАН -->
+  <div id="game-container">
+    <div id="canvas-wrapper">
+      <canvas id="gameCanvas"></canvas>
+    </div>
+
+    <div id="sidebar">
+      <div id="players-panel">
+        <h2>Игроки</h2>
+        <div id="round-display"></div>
+        <div id="players-list"></div>
+      </div>
+
+      <div id="turn-panel">
+        <div id="current-player">Ход: -</div>
+        <div id="wind-indicator">Ветер: <span id="wind-value">0</span></div>
+        <div id="timer">Время: <span id="time-value">60</span>с</div>
+      </div>
+
+      <div id="weapon-panel">
+        <h2>Оружие</h2>
+        <div id="angle-control">
+          <label>Угол: <span id="angle-value">90</span>°</label>
+          <input type="range" id="angle-slider" min="0" max="180" value="90">
+        </div>
+        <div id="power-control">
+          <label>Мощность: <span id="power-value">70</span>%</label>
+          <input type="range" id="power-slider" min="0" max="100" value="70">
+        </div>
+        <div class="input-hint">&larr;&rarr; угол &middot; &uarr;&darr; мощность &middot; ПРОБЕЛ выстрел</div>
+      </div>
+
+      <div id="inventory-panel">
+        <h2>Инвентарь</h2>
+        <div id="inventory-list"></div>
+      </div>
+
+      <div id="shop-panel">
+        <h2>Магазин</h2>
+        <div id="money-display">Деньги: $<span id="money-value">500</span></div>
+        <div id="shop-items"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Пауза между раундами -->
+  <div id="interround-overlay">
+    <div id="interround-box">
+      <div id="interround-title">РАУНД ЗАВЕРШЕН</div>
+      <div id="interround-winner"></div>
+      <div id="interround-countdown"></div>
+      <div id="interround-slots"></div>
+      <div id="interround-hint"></div>
+    </div>
+  </div>
+
+  <!-- Сообщения -->
+  <div id="message-panel">
+    <div id="message-text"></div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/shared/constants.js"></script>
+  <script src="/shared/weapons.js"></script>
+  <script src="/shared/physics.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+  <script src="src/utils/Network.js"></script>
+  <script src="src/utils/InputHandler.js"></script>
+  <script src="src/objects/Sky.js"></script>
+  <script src="src/objects/Tank.js"></script>
+  <script src="src/objects/Terrain.js"></script>
+  <script src="src/scenes/BootScene.js"></script>
+  <script src="src/scenes/GameScene.js"></script>
+  <script src="src/scenes/UIScene.js"></script>
+  <script src="src/main.js"></script>
+</body>
+</html>

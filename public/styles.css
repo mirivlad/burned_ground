@@ -1,0 +1,326 @@
+/**
+ * Стили в DOS / Pixel Art стиле
+ */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background-color: #000;
+  font-family: 'Courier New', monospace;
+  overflow: hidden;
+  color: #fff;
+  width: 100vw;
+  height: 100vh;
+}
+
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(0deg,
+    rgba(0,0,0,0.12) 0px, rgba(0,0,0,0.12) 1px, transparent 1px, transparent 3px);
+  pointer-events: none;
+  z-index: 9000;
+}
+
+.hidden { display: none !important; }
+
+button {
+  background: #020402;
+  border: 1px solid #33ff66;
+  color: #9dffb0;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  font-weight: bold;
+  letter-spacing: 1px;
+  padding: 7px 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+button:hover:not(:disabled) { background: #33ff66; color: #02120a; }
+button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+input[type="text"] {
+  background: #020402;
+  border: 1px solid #33ff66;
+  color: #9dffb0;
+  font-family: 'Courier New', monospace;
+  font-size: 14px;
+  padding: 8px 12px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+
+input[type="text"]:focus { outline: none; box-shadow: 0 0 10px rgba(51,255,102,0.35); }
+input[type="text"]::placeholder { color: #3a5a42; text-transform: uppercase; }
+
+/* ============ ЭКРАН ВХОДА ============ */
+
+#entry-screen, #room-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(ellipse at center, #0a140b 0%, #030503 70%), #030503;
+}
+
+#entry-box, #room-box {
+  border: 2px double #33ff66;
+  box-shadow: 0 0 40px rgba(51,255,102,0.2);
+  background: #050a06;
+  padding: 24px 32px 20px;
+  color: #9dffb0;
+}
+
+#entry-box { width: 560px; max-width: 94vw; }
+#room-box { width: 700px; max-width: 96vw; max-height: 94vh; overflow-y: auto; }
+
+#entry-title {
+  font-size: 38px; font-weight: bold; letter-spacing: 9px; text-align: center;
+  color: #33ff66; text-shadow: 0 0 14px rgba(51,255,102,0.8); margin-bottom: 2px;
+}
+
+#entry-sub { text-align: center; color: #4a7a56; letter-spacing: 4px; font-size: 11px; margin-bottom: 18px; }
+
+.entry-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.entry-row input { flex: 1; }
+
+.entry-divider { text-align: center; color: #3a5a42; font-size: 11px; margin: 12px 0; letter-spacing: 2px; }
+
+#entry-reconnect, #entry-error {
+  text-align: center; color: #ffd24a; margin-bottom: 10px; font-size: 12px; letter-spacing: 1px;
+}
+#entry-error { color: #ff5555; }
+
+#entry-hint { text-align: center; font-size: 10px; color: #3a5a42; margin-top: 12px; letter-spacing: 1px; }
+
+.lobby-label { font-size: 11px; color: #4a7a56; letter-spacing: 2px; margin: 8px 0 6px; }
+
+/* Палитра цветов */
+#entry-colors { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+
+.color-swatch {
+  width: 34px; height: 34px; border: 2px solid #1e3d26; cursor: pointer;
+}
+.color-swatch.selected { border-color: #fff; box-shadow: 0 0 10px rgba(255,255,255,0.6); transform: scale(1.1); }
+.color-swatch:hover:not(.selected) { border-color: #666; }
+
+/* ============ ЭКРАН КОМНАТЫ ============ */
+
+#room-header {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 6px;
+  font-size: 14px; color: #33ff66; letter-spacing: 2px;
+}
+#room-code { color: #ffd24a; font-size: 20px; letter-spacing: 5px; }
+#room-header button { font-size: 10px; padding: 5px 10px; margin-left: auto; }
+#btn-leave-room { margin-left: 0 !important; border-color: #aa3333; color: #ff8888; }
+#btn-leave-room:hover { background: #aa3333; color: #fff; }
+
+#room-phase-label { color: #ffd24a; font-size: 12px; letter-spacing: 2px; margin-bottom: 8px; }
+
+#room-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+
+.room-slot {
+  border: 1px solid #1e3d26;
+  background: rgba(51,255,102,0.02);
+  padding: 8px 10px;
+  min-height: 56px;
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px;
+}
+
+.room-slot .slot-top { display: flex; align-items: center; gap: 8px; }
+.room-slot .slot-color { width: 16px; height: 16px; border: 1px solid #000; flex-shrink: 0; }
+.room-slot .slot-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #9dffb0; }
+.room-slot .slot-kind { font-size: 10px; color: #4a7a56; letter-spacing: 1px; }
+.room-slot .slot-claim { font-size: 10px; padding: 4px 8px; }
+
+.room-slot.empty-slot { opacity: 0.6; }
+.room-slot.me-slot { outline: 1px dashed #ffd24a; outline-offset: 2px; }
+.room-slot .slot-host-controls { display: flex; gap: 4px; flex-wrap: wrap; }
+.room-slot .slot-host-controls button, .room-slot .slot-host-controls select {
+  font-size: 9px; padding: 3px 6px; text-transform: none;
+}
+.room-slot select {
+  background: #020402; color: #9dffb0; border: 1px solid #2d5237;
+  font-family: 'Courier New', monospace;
+}
+
+.room-slot .slot-difficulty { color: #ff77ff; font-size: 10px; }
+
+#host-controls { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+#host-controls.hidden { display: none; }
+
+#room-status { color: #ffd24a; font-size: 12px; text-align: center; margin-bottom: 8px; min-height: 1.2em; letter-spacing: 1px; }
+
+#room-spectators { font-size: 11px; color: #6b8f75; margin-bottom: 6px; }
+#room-spectators:empty::after { content: '— нет —'; color: #3a5a42; }
+
+/* ============ ИГРОВОЙ ЭКРАН ============ */
+
+#game-container { display: none; }
+#game-container.visible { display: flex; }
+
+#canvas-wrapper {
+  flex: 1 1 auto;
+  background-color: #000;
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+
+#gameCanvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+
+#sidebar {
+  flex: 0 0 230px; min-width: 230px; max-width: 230px;
+  background: linear-gradient(180deg, #0d1a10 0%, #060a07 100%);
+  border-left: 4px solid #3a9d23;
+  padding: 10px; overflow-y: auto; font-size: 12px; height: 100%;
+}
+
+#players-panel, #turn-panel, #weapon-panel, #inventory-panel, #shop-panel {
+  background-color: rgba(0,0,0,0.5);
+  border: 1px solid #2d5237;
+  padding: 8px; margin-bottom: 10px;
+}
+
+h2 {
+  font-size: 13px; color: #3a9d23; text-transform: uppercase;
+  border-bottom: 1px solid #2d5237; padding-bottom: 4px; margin-bottom: 8px; letter-spacing: 2px;
+}
+
+#round-display { font-size: 11px; color: #ffd24a; margin-bottom: 6px; }
+
+.player-item {
+  display: flex; justify-content: space-between; gap: 6px; align-items: center;
+  padding: 4px; margin-bottom: 4px;
+  background-color: rgba(58,157,35,0.08);
+  border-left: 3px solid #666;
+}
+.player-item .p-color { width: 10px; height: 10px; flex-shrink: 0; }
+.player-item .p-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-item.alive { border-left-color: #3a9d23; }
+.player-item.dead { border-left-color: #ff3333; opacity: 0.45; }
+.player-item.offline .p-name::after { content: ' [offline]'; color: #ff5555; font-size: 10px; }
+.player-item.current { background-color: rgba(255,210,74,0.12); border-left-color: #ffd24a; }
+.player-item.bot-item .p-name::after { content: ' [бот]'; color: #ff77ff; font-size: 10px; }
+
+.player-hp { color: #ff6666; font-size: 11px; }
+.player-money { color: #ffd700; font-size: 11px; }
+
+#wind-indicator, #timer { margin-top: 4px; font-size: 11px; }
+
+#current-player { font-weight: bold; color: #ffd24a; text-align: center; padding: 4px; }
+#current-player.my-turn { color: #33ff66; animation: flash 1.2s infinite; }
+#time-value { color: #fff; }
+#timer.low #time-value { color: #ff4444; animation: flash 0.6s infinite; }
+
+#angle-control, #power-control { margin-bottom: 8px; }
+
+label { display: block; margin-bottom: 4px; font-size: 11px; color: #8aa88f; }
+
+input[type="range"] {
+  width: 100%; -webkit-appearance: none; background: #1a2e1e;
+  height: 8px; border: 1px solid #3a9d23;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px;
+  background: #3a9d23; border: 2px solid #66ff66; cursor: pointer;
+}
+#angle-value, #power-value { color: #66ff66; }
+
+.input-hint { font-size: 10px; color: #4a6b52; text-align: center; margin-top: 4px; }
+
+.inventory-item {
+  display: flex; justify-content: space-between; padding: 4px; margin-bottom: 4px;
+  background-color: rgba(58,157,35,0.08); cursor: pointer; border: 1px solid transparent;
+}
+.inventory-item:hover { background-color: rgba(58,157,35,0.25); }
+.inventory-item.active { border: 1px solid #66ff66; background-color: rgba(58,157,35,0.3); }
+.inventory-item.out-of-stock { opacity: 0.3; cursor: not-allowed; }
+.weapon-name { color: #fff; }
+.weapon-count { color: #ffd700; }
+
+#money-display {
+  text-align: center; font-size: 14px; color: #ffd700; margin-bottom: 8px;
+  padding: 4px; background-color: rgba(255,215,0,0.08);
+}
+
+.shop-item {
+  display: flex; flex-direction: column; padding: 6px; margin-bottom: 6px;
+  background-color: rgba(58,157,35,0.08); border: 1px solid #2d5237; cursor: pointer;
+}
+.shop-item:hover:not(.too-expensive) { background-color: rgba(58,157,35,0.25); border-color: #3a9d23; }
+.shop-item.too-expensive { opacity: 0.4; cursor: not-allowed; }
+.shop-item-header { display: flex; justify-content: space-between; margin-bottom: 4px; }
+.shop-item-name { color: #66ff66; font-weight: bold; }
+.shop-item-price { color: #ffd700; }
+.shop-item-desc { font-size: 10px; color: #8aa88f; }
+
+/* Зритель */
+#sidebar.spectator #weapon-panel, #sidebar.spectator #inventory-panel, #sidebar.spectator #shop-panel { display: none; }
+#sidebar.spectator #turn-panel::after {
+  content: 'РЕЖИМ НАБЛЮДАТЕЛЯ'; display: block; color: #ff77ff;
+  font-size: 10px; text-align: center; margin-top: 6px; letter-spacing: 2px;
+}
+
+/* ============ ПАУЗА МЕЖДУ РАУНДАМИ ============ */
+
+#interround-overlay {
+  position: fixed; inset: 0; z-index: 4000;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(0,0,0,0.82);
+}
+#interround-overlay.visible { display: flex; }
+
+#interround-box {
+  width: 640px; max-width: 94vw; max-height: 92vh; overflow-y: auto;
+  border: 2px double #ffd24a; background: #050a06; padding: 24px 30px;
+  color: #9dffb0; text-align: center;
+}
+#interround-title { font-size: 22px; color: #ffd24a; letter-spacing: 4px; margin-bottom: 8px; }
+#interround-winner { font-size: 13px; margin-bottom: 6px; }
+#interround-countdown { font-size: 30px; color: #33ff66; margin-bottom: 12px; }
+#interround-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; text-align: left; margin-bottom: 10px; }
+#interround-hint { font-size: 10px; color: #4a7a56; }
+
+/* ============ СООБЩЕНИЯ ============ */
+
+#message-panel {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  background-color: rgba(2,6,3,0.92); border: 1px solid #3a9d23;
+  padding: 10px 20px; min-width: 300px; text-align: center;
+  z-index: 8000; display: none;
+}
+#message-panel.visible { display: block; }
+#message-text { color: #ffd24a; font-size: 14px; }
+
+#match-overlay {
+  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+  background-color: rgba(0,0,0,0.9); display: none;
+  align-items: center; justify-content: center; z-index: 3000;
+}
+#match-overlay.visible { display: flex; }
+
+#match-results {
+  background: #050a06; border: 2px double #ffd24a;
+  box-shadow: 0 0 40px rgba(255,210,74,0.2);
+  padding: 30px; min-width: 500px; text-align: center; color: #9dffb0;
+}
+#match-results h1 { font-size: 26px; color: #ffd24a; margin-bottom: 20px; letter-spacing: 4px; }
+.stat-row {
+  display: flex; justify-content: space-between; padding: 8px; margin-bottom: 4px;
+  background-color: rgba(58,157,35,0.1); font-size: 13px;
+}
+.winner-highlight { color: #33ff66; font-weight: bold; }
+
+#sidebar::-webkit-scrollbar, #room-box::-webkit-scrollbar, #interround-box::-webkit-scrollbar { width: 8px; }
+#sidebar::-webkit-scrollbar-track, #room-box::-webkit-scrollbar-track { background: #060a07; }
+#sidebar::-webkit-scrollbar-thumb, #room-box::-webkit-scrollbar-thumb { background: #2d5237; border: 1px solid #3a9d23; }
+
+@keyframes flash {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
