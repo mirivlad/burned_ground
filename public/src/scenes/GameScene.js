@@ -21,6 +21,12 @@ class GameScene extends Phaser.Scene {
 
     net.on('round_start', (d) => this.handleRoundStart(d));
     net.on('game_snapshot', (d) => this.handleGameSnapshot(d));
+    net.on('special_update', (d) => {
+      // Roller/Napalm: путь приходит в момент приземления снаряда
+      if (d && d.special) {
+        this.pendingSpecial = { ...(this.pendingSpecial || {}), ...d.special };
+      }
+    });
     // При реконнекте снапшот приходит внутри rejoin_result
     net.on('rejoin_result', (d) => {
       if (d && d.ok && d.snapshot) this.handleGameSnapshot(d.snapshot);
@@ -158,14 +164,106 @@ class GameScene extends Phaser.Scene {
     });
   }
 
+  /**
+   * Анимация точки по полилинии от сервера (плоский массив [x,y,x,y,...]).
+   * 1 точка = stepMs. Возвращает объект снаряда.
+   */
+  animatePolyline(flat, stepMs, colorNum, radius = 3) {
+    if (!flat || flat.length < 4) return null;
+
+    const dot = this.add.circle(flat[0], flat[1], radius, colorNum);
+    let i = 2;
+
+    this.time.addEvent({
+      delay: stepMs,
+      repeat: Math.floor(flat.length / 2),
+      callback: () => {
+        if (i + 1 < flat.length) {
+          dot.setPosition(flat[i], flat[i + 1]);
+          i += 2;
+        }
+      }
+    });
+
+    // Живет до конца полилинии
+    this.time.delayedCall((flat.length / 2) * stepMs + 200, () => dot.destroy());
+    return dot;
+  }
+
+  /**
+   * Ждет появления поля в this.pendingSpecial (путь приходит отдельным событием),
+   * затем запускает анимацию качения/растекания.
+   */
+  waitForSpecialPath(field, onReady, attempts = 60) {
+    if (this.pendingSpecial && this.pendingSpecial[field]) {
+      onReady(this.pendingSpecial[field]);
+      return;
+    }
+    if (attempts <= 0) return;
+    this.time.delayedCall(50, () => this.waitForSpecialPath(field, onReady, attempts - 1));
+  }
+
   handleShot(data) {
-    const { playerId, angle, power, wind, startX, startY, weaponId } = data;
+    const { playerId, angle, power, wind, startX, startY, weaponId, special } = data;
 
     const tank = this.tanks[playerId];
     if (tank) tank.setAngle(angle);
 
     if (this.players[playerId]) this.players[playerId].angle = angle;
 
+    const weapon = window.WEAPONS[weaponId] || {};
+    const colorNum = Phaser.Display.Color.HexStringToColor(weapon.color || '#ffffff').color;
+
+    if (this.aimTrail) {
+      // Новый выстрел убирает пристрелочный след
+      this.aimTrail.destroy();
+      this.aimTrail = null;
+    }
+
+    // ==== Спец-оружие: анимация по полилиниям сервера ====
+    if (special) {
+      this.pendingSpecial = { ...special };
+      window.sound.shot();
+
+      const mainMs = special.stepMs || 30;
+
+      if (special.type === 'mirv') {
+        const main = this.animatePolyline(special.main, 16.67, colorNum);
+
+        this.time.delayedCall((special.main.length / 2) * 16.67 + 50, () => {
+          // Распад: три боеголовки
+          for (const w of special.warheads) {
+            this.animatePolyline(w, mainMs, colorNum, 2);
+          }
+          main?.destroy();
+        });
+      } else if (special.type === 'roller') {
+        this.animatePolyline(special.main, 16.67, colorNum);
+        const mainDoneMs = (special.main.length / 2) * 16.67 + 100;
+
+        this.time.delayedCall(mainDoneMs, () => {
+          this.waitForSpecialPath('path', (path) => {
+            // Шар катится по склону
+            this.animatePolyline(path, mainMs, colorNum, 4);
+          });
+        });
+      } else if (special.type === 'napalm') {
+        this.animatePolyline(special.main, 16.67, colorNum);
+        const mainDoneMs = (special.main.length / 2) * 16.67 + 100;
+
+        this.time.delayedCall(mainDoneMs, () => {
+          this.waitForSpecialPath('flows', (flows) => {
+            for (const flow of flows) {
+              // Огненные точки стекают по склону
+              this.animatePolyline(flow, mainMs * 2, 0xff5522, 3);
+            }
+          });
+        });
+      }
+      return;
+    }
+
+    // ==== Обычный снаряд: локальный пересчет траектории ====
     const heights = this.terrain ? this.terrain.heights : null;
     const trajectory = window.SharedPhysics.calculateProjectileTrajectory({
       startX, startY, angle, power, wind, heights
@@ -173,24 +271,14 @@ class GameScene extends Phaser.Scene {
 
     if (!trajectory || trajectory.length < 2) return;
 
-    const weapon = window.WEAPONS[weaponId] || {};
-    const colorNum = Phaser.Display.Color.HexStringToColor(weapon.color || '#ffffff').color;
-
     const projectile = this.add.circle(trajectory[0].x, trajectory[0].y, 3, colorNum);
-    projectile.setPosition(trajectory[0].x, trajectory[0].y);
 
     // Твин с массивом точек ненадежен в Phaser 3.60 — анимируем вручную:
     // 1 точка траектории = 1 тик физики (16.67мс), снаряд точно следует кривой
     // и останавливается в точке падения (не пролетает сквозь грунт).
     const isSmoke = weaponId === 'smoke_tracer';
 
-    if (isSmoke && this.aimTrail) this.aimTrail.destroy();
     if (isSmoke) this.aimTrail = this.add.graphics();
-    if (!isSmoke && this.aimTrail) {
-      // Боевой выстрел убирает пристрелочный след
-      this.aimTrail.destroy();
-      this.aimTrail = null;
-    }
 
     const trail = isSmoke ? this.aimTrail : this.add.graphics();
     let idx = 0;

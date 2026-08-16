@@ -35,6 +35,36 @@
       radius: 30,
       color: '#ff8844'
     },
+    roller: {
+      id: 'roller',
+      name: 'Roller',
+      price: 350,
+      infinite: false,
+      damage: 35,
+      radius: 25,
+      effect: 'roller',              // катится вниз по склону, взрыв в низине
+      color: '#99ffcc'
+    },
+    mirv: {
+      id: 'mirv',
+      name: 'MIRV',
+      price: 800,
+      infinite: false,
+      damage: 25,                    // на боеголовку (их три)
+      radius: 20,
+      effect: 'mirv',                // распад на 3 боеголовки в апексе
+      color: '#ffdd55'
+    },
+    napalm: {
+      id: 'napalm',
+      name: 'Napalm',
+      price: 450,
+      infinite: false,
+      damage: 15,                    // на огненный шар
+      radius: 12,
+      effect: 'napalm',              // горящая жидкость течет вниз по склону
+      color: '#ff6622'
+    },
     dirt_ball: {
       id: 'dirt_ball',
       name: 'Dirt Ball',

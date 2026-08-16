@@ -203,6 +203,67 @@ function findSpawnPositions(heights, numPlayers) {
   return positions;
 }
 
+/**
+ * Качение снаряда (Roller): от точки падения скатывается в сторону
+ * понижения до локального минимума. Возвращает путь по поверхности.
+ * Направление определяется по окну (высоты округлены — единичный
+ * перепад может быть 0 на пологом склоне).
+ */
+function rollPath(heights, startX, maxSteps = 400, window = 8) {
+  const path = [];
+  let x = Math.max(window, Math.min(MAP_WIDTH - 1 - window, Math.round(startX)));
+
+  const ahead = (dir) => {
+    const nx = Math.max(0, Math.min(MAP_WIDTH - 1, x + dir * window));
+    return heights[nx] - heights[x];
+  };
+
+  for (let i = 0; i < maxSteps; i++) {
+    path.push({ x, y: heights[x] });
+
+    const leftDown = ahead(-1);
+    const rightDown = ahead(1);
+
+    let dir = 0;
+    if (leftDown > 0.5 && leftDown >= rightDown) dir = -1;
+    else if (rightDown > 0.5) dir = 1;
+
+    if (dir === 0) break;   // низина или плато шире окна
+    x += dir;
+  }
+
+  path.push({ x, y: heights[x] });
+  return path;
+}
+
+/**
+ * Напалм: две струи растекаются влево и вправо вниз по склону.
+ * Возвращаются точки струй (точка = будущий огненный шар).
+ */
+function napalmFlows(heights, startX, stepEvery = 10) {
+  const flows = [];
+
+  for (const dir of [1, -1]) {
+    const flow = [];
+    let x = Math.max(1, Math.min(MAP_WIDTH - 2, Math.round(startX)));
+
+    for (let step = 0; step < 200; step++) {
+      // Склон смотрим по окну в 3 колонки (округленные высоты дают ступеньки)
+      const nx = Math.max(0, Math.min(MAP_WIDTH - 1, x + dir * 3));
+      if (heights[nx] > heights[x] + 0.5) {
+        x += dir;
+      } else {
+        break; // уперлась в подъем/плато
+      }
+      if (step % stepEvery === 0) flow.push({ x, y: heights[x] });
+    }
+
+    if (flow.length > 0) flows.push(flow);
+  }
+
+  return flows;
+}
+
 module.exports = {
   generateTerrain,
   smoothHeights,
@@ -210,5 +271,7 @@ module.exports = {
   applyDirtBall,
   crumbleTerrain,
   findSpawnPositions,
+  rollPath,
+  napalmFlows,
   seededRandom
 };

@@ -8,13 +8,15 @@ const {
 } = require('./shared/constants');
 const { getWeapon, BASE_WEAPON_ID } = require('./shared/weapons');
 const {
-  generateTerrain, applyExplosion, applyDirtBall, crumbleTerrain, findSpawnPositions
+  generateTerrain, applyExplosion, applyDirtBall, crumbleTerrain, findSpawnPositions,
+  rollPath, napalmFlows
 } = require('./shared/terrain');
 const {
   calculateProjectileTrajectory,
   calculateExplosionDamage,
   calculateFallDamage,
-  updateTankPhysics
+  updateTankPhysics,
+  simulateMirv
 } = require('./shared/physics');
 const { decideShot, thinkDelay, botName } = require('./bot');
 
@@ -933,10 +935,49 @@ class Room {
 
     const impact = trajectory[trajectory.length - 1];
 
-    // Снаряд в полете: резервируем фазу сразу (нельзя стрелять дважды),
-    // а попадание применяем через реальное время полета — клиенты увидят
-    // взрыв ровно тогда, когда снаряд долетит
-    const flightMs = Math.min(trajectory.length * 16.67, 8000);
+    // === Спец-оружие: расписание попаданий и данные для анимации ===
+    const ROLL_STEP_MS = 12;
+    let special = null;
+    const impacts = [];   // [{ atMs, x, y }]
+
+    const flatten = (pts, step = 2) => {
+      const out = [];
+      for (let i = 0; i < pts.length; i += step) {
+        out.push(Math.round(pts[i].x), Math.round(pts[i].y));
+      }
+      return out;
+    };
+
+    if (weapon.effect === 'mirv') {
+      const m = simulateMirv({ startX, startY, angle, power, wind: this.wind, heights: this.terrain });
+      special = {
+        type: 'mirv',
+        main: m.main,
+        warheads: m.warheads.map(w => w.trajectory),
+        stepMs: 33
+      };
+      m.warheads.forEach(w => {
+        if (w.impact.x >= 0 && w.impact.x < MAP_WIDTH) {
+          // Задержка от апекса (callback полета срабатывает в апексе)
+          impacts.push({ atMs: (w.trajectory.length / 2) * 16.67, x: w.impact.x, y: w.impact.y });
+        }
+      });
+    } else if (weapon.effect === 'roller') {
+      special = {
+        type: 'roller',
+        main: flatten(trajectory),
+        path: null, // заполняется ниже после проверки карты
+        stepMs: ROLL_STEP_MS
+      };
+    } else if (weapon.effect === 'napalm') {
+      special = {
+        type: 'napalm',
+        main: flatten(trajectory),
+        flows: null,
+        stepMs: ROLL_STEP_MS
+      };
+    }
+
     const missedMap = impact.y > 7000 || impact.x < 0 || impact.x >= MAP_WIDTH;
 
     this.emit('shot', {
@@ -947,64 +988,124 @@ class Room {
       startX,
       startY,
       weaponId,
-      trajectoryDurationMs: flightMs
+      trajectoryDurationMs: trajectory.length * 16.67,
+      special
     });
 
     this.turnPhase = 'resolving';
 
+    // Полет основного снаряда (или до распада MIRV)
+    const flightMs = special && special.type === 'mirv'
+      ? Math.min(special.main.length / 2 * 16.67, 8000)
+      : Math.min(trajectory.length * 16.67, 8000);
+
     this.setTimer('resolve', () => {
       if (this.destroyed || this.phase !== 'playing') return;
 
-      if (missedMap) {
+      if (missedMap && impacts.length === 0) {
         this.endTurn();
         return;
       }
 
-      const impactX = Math.max(0, Math.min(MAP_WIDTH - 1, impact.x));
-      const impactY = impact.y;
-
-      // Урон от точки взрыва
-      const damages = [];
-      for (const otherTank of this.tanks) {
-        const other = this.players[otherTank.playerId];
-        if (!other || !other.isAlive) continue;
-
-        const dx = otherTank.x - impactX;
-        const dy = (otherTank.y - PHYSICS.tankHeight / 2) - impactY;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const effectiveRadius = weapon.radius + PHYSICS.tankWidth / 2;
-
-        const damage = calculateExplosionDamage(dist, effectiveRadius, weapon.damage);
-        if (damage > 0) damages.push({ playerId: otherTank.playerId, damage });
+      // Roller/Napalm: путь считается по рельефу в момент приземления
+      if (special && special.type === 'roller') {
+        const path = rollPath(this.terrain, impact.x);
+        special.path = flatten(path);
+        const end = path[path.length - 1];
+        impacts.push({ atMs: path.length * ROLL_STEP_MS, x: end.x, y: end.y });
+        this.emit('special_update', { playerId, special });
+      } else if (special && special.type === 'napalm') {
+        const flows = napalmFlows(this.terrain, impact.x);
+        special.flows = flows.map(f => flatten(f));
+        flows.forEach((f, fi) => {
+          f.forEach((pt, k) => {
+            impacts.push({ atMs: 200 + k * 150, x: pt.x, y: pt.y });
+          });
+        });
+        this.emit('special_update', { playerId, special });
       }
 
-      let terrainDiff = 0;
-      if (weapon.effect === 'add_earth') {
-        terrainDiff = -applyDirtBall(this.terrain, impactX, impactY, weapon.radius);
-        crumbleTerrain(this.terrain);
-      } else if (weapon.effect === 'smoke') {
-        // Дымовая пристрелка: без кратера и урона
-      } else {
-        terrainDiff = applyExplosion(this.terrain, impactX, impactY, weapon.radius);
-        crumbleTerrain(this.terrain);
-        this.addMoney(playerId, terrainDiff, 'terrain');
+      // Обычное оружие — одно попадание в конце полета
+      if (impacts.length === 0) {
+        impacts.push({ atMs: 0, x: impact.x, y: impact.y });
       }
 
-      this.emit('explosion', {
-        x: impactX, y: impactY, radius: weapon.radius, weaponId,
-        damages, terrainDiff: Math.round(terrainDiff)
-      });
+      const applyImpact = (ix, iy) => {
+        ix = Math.max(0, Math.min(MAP_WIDTH - 1, ix));
 
-      this.emit('terrain_update', { heights: this.terrain, crumbled: true });
+        const damages = [];
+        for (const otherTank of this.tanks) {
+          const other = this.players[otherTank.playerId];
+          if (!other || !other.isAlive) continue;
 
-      for (const { playerId: hitId, damage } of damages) {
-        this.damagePlayer(hitId, damage, playerId, 'explosion');
+          const dx = otherTank.x - ix;
+          const dy = (otherTank.y - PHYSICS.tankHeight / 2) - iy;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const effectiveRadius = weapon.radius + PHYSICS.tankWidth / 2;
+
+          const dmg = calculateExplosionDamage(dist, effectiveRadius, weapon.damage);
+          if (dmg > 0) damages.push({ playerId: otherTank.playerId, damage: dmg });
+        }
+
+        let terrainDiff = 0;
+        if (weapon.effect === 'add_earth') {
+          terrainDiff = -applyDirtBall(this.terrain, ix, iy, weapon.radius);
+        } else if (weapon.effect !== 'smoke') {
+          terrainDiff = applyExplosion(this.terrain, ix, iy, weapon.radius);
+          this.addMoney(playerId, terrainDiff, 'terrain');
+        }
+
+        this.emit('explosion', {
+          x: ix, y: iy, radius: weapon.radius, weaponId,
+          damages, terrainDiff: Math.round(terrainDiff)
+        });
+
+        for (const { playerId: hitId, damage } of damages) {
+          this.damagePlayer(hitId, damage, playerId, 'explosion');
+        }
+      };
+
+      impacts
+        .slice()
+        .sort((a, b) => a.atMs - b.atMs)
+        .forEach((im, i) => {
+          const isLast = i === impacts.length - 1;
+          if (im.atMs <= 0) {
+            applyImpact(im.x, im.y);
+            if (isLast) this.finishShot(weapon, playerId);
+            return;
+          }
+          this.scheduleImpact(() => {
+            if (this.destroyed || this.phase !== 'playing') return;
+            applyImpact(im.x, im.y);
+            if (isLast) this.finishShot(weapon, playerId);
+          }, im.atMs);
+        });
+
+      if (impacts.every(im => im.atMs > 0)) {
+        // Все попадания отложены (roller/napalm/mirv): стабилизация после последнего
+        // выполняется в его таймере через finishShot
+        return;
       }
 
-      this.runStabilization(0);
+      // Одиночное мгновенное попадание уже обработано выше
     }, flightMs);
 
     return {};
+  }
+
+  /**
+   * Завершение выстрела: осыпание, рассылка рельефа, стабилизация танков.
+   */
+  finishShot(weapon, playerId) {
+    if (this.destroyed || this.phase !== 'playing') return;
+
+    if (weapon.effect !== 'smoke') {
+      crumbleTerrain(this.terrain);
+      this.emit('terrain_update', { heights: this.terrain, crumbled: true });
+    }
+
+    this.runStabilization(0);
   }
 
   runStabilization(settleDelayMs) {
@@ -1133,6 +1234,19 @@ class Room {
     }, ms);
   }
 
+  /**
+   * Отложенные попадания (боеголовки MIRV, шары напалма): независимые таймеры,
+   * общий пул this.timers.impacts очищается вместе с остальными.
+   */
+  scheduleImpact(fn, ms) {
+    if (!this.timers.impacts) this.timers.impacts = [];
+    const t = setTimeout(() => {
+      this.timers.impacts = (this.timers.impacts || []).filter(x => x !== t);
+      fn();
+    }, ms);
+    this.timers.impacts.push(t);
+  }
+
   clearTimer(name) {
     if (this.timers[name]) {
       clearTimeout(this.timers[name]);
@@ -1141,7 +1255,14 @@ class Room {
   }
 
   clearTimers() {
-    Object.keys(this.timers).forEach(k => this.clearTimer(k));
+    Object.keys(this.timers).forEach(k => {
+      if (k === 'impacts') {
+        (this.timers[k] || []).forEach(clearTimeout);
+        this.timers[k] = [];
+      } else {
+        this.clearTimer(k);
+      }
+    });
   }
 }
 

@@ -165,13 +165,74 @@
     return { shouldSlide: true, direction };
   }
 
+  /**
+   * MIRV: снаряд летит до апекса, там распадается на 3 боеголовки
+   * с разносом горизонтальной скорости. Все траектории детерминированы —
+   * сервер и клиент анимируют одинаково.
+   * @returns {{apexTicks:number, main:[], warheads:{trajectory:[], impact:{x,y}}[]}}
+   */
+  function simulateMirv({ startX, startY, angle, power, wind, heights }) {
+    const angleRad = (angle * Math.PI) / 180;
+    const speed = 15 + (power / 100) * 20;
+
+    let vx = -Math.cos(angleRad) * speed;
+    let vy = -Math.sin(angleRad) * speed;
+
+    let x = startX;
+    let y = startY;
+    const main = [];
+    let apexTicks = 0;
+
+    // Полет до апекса (vy >= 0)
+    for (let t = 0; t < PH.maxTrajectoryTicks; t++) {
+      main.push(Math.round(x), Math.round(y));
+      if (x < 0 || x >= MAP_W || y > MAP_H) break;
+
+      const xi = Math.floor(x);
+      if (heights && xi >= 0 && xi < heights.length && y >= heights[xi]) break;
+
+      if (vy >= 0 && t > 0) { apexTicks = t; break; } // апекс
+
+      x += vx;
+      y += vy;
+      vy += PH.gravity;
+      vx += wind * PH.windCoeff;
+      apexTicks = t + 1;
+    }
+
+    // Три боеголовки из апекса
+    const warheads = [];
+    for (const dv of [-2.5, 0, 2.5]) {
+      let wx = x, wy = y, wvx = vx + dv, wvy = 0;
+      const trajectory = [];
+
+      for (let t = 0; t < PH.maxTrajectoryTicks; t++) {
+        trajectory.push(Math.round(wx), Math.round(wy));
+        if (wx < 0 || wx >= MAP_W || wy > MAP_H) break;
+
+        const xi = Math.floor(wx);
+        if (heights && xi >= 0 && xi < heights.length && wy >= heights[xi]) break;
+
+        wx += wvx;
+        wy += wvy;
+        wvy += PH.gravity;
+        wvx += wind * PH.windCoeff;
+      }
+
+      warheads.push({ trajectory, impact: { x: wx, y: wy } });
+    }
+
+    return { apexTicks, main, warheads };
+  }
+
   const PhysicsAPI = {
     calculateProjectileTrajectory,
     calculateExplosionDamage,
     calculateFallDamage,
     updateTankPhysics,
     checkTankSupport,
-    checkSlope
+    checkSlope,
+    simulateMirv
   };
 
   if (typeof module !== 'undefined' && module.exports) {

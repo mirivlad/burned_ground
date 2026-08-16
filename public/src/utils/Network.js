@@ -106,7 +106,7 @@ class Network {
     };
 
     [
-      'room_launched', 'host_changed', 'inter_round',
+      'room_launched', 'host_changed', 'inter_round', 'special_update',
       'match_start', 'round_start', 'turn_start', 'turn_timeout',
       'shot', 'explosion', 'terrain_update', 'tank_update', 'players_update',
       'hp_update', 'death', 'fall_damage', 'player_disconnected',
