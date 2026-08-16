@@ -11,6 +11,7 @@ const path = require('path');
 
 const { GAME, ROOM } = require('./shared/constants');
 const { Room } = require('./room');
+const auth = require('./db');
 
 // Переопределения для тестов
 const CONFIG = {
@@ -23,8 +24,42 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+app.use(express.json({ limit: '100kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/shared', express.static(path.join(__dirname, 'shared')));
+
+// ============================================
+// АВТОРИЗАЦИЯ И СТАТИСТИКА
+// ============================================
+
+function tokenFromReq(req) {
+  const header = req.headers.authorization || '';
+  return header.startsWith('Bearer ') ? header.slice(7) : null;
+}
+
+app.post('/api/auth/register', (req, res) => {
+  const result = auth.registerUser(req.body?.username, req.body?.password);
+  if (result.error) return res.status(400).json({ error: result.error });
+  res.json({ token: result.token, user: result.user });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const result = auth.loginUser(req.body?.username, req.body?.password);
+  if (result.error) return res.status(401).json({ error: result.error });
+  res.json({ token: result.token, user: result.user });
+});
+
+app.get('/api/me', (req, res) => {
+  const user = auth.userByToken(tokenFromReq(req));
+  if (!user) return res.status(401).json({ error: 'Не авторизован' });
+  res.json({ user, stats: auth.userStats(user.id) });
+});
+
+app.get('/api/stats/:username', (req, res) => {
+  const stats = auth.userStatsByName(req.params.username);
+  if (!stats) return res.status(404).json({ error: 'Игрок не найден' });
+  res.json(stats);
+});
 
 // ============================================
 // МЕНЕДЖЕР КОМНАТ
@@ -47,7 +82,10 @@ function generateRoomCode() {
 
 function createRoom({ hostSocket, hostName, hostColorIdx }) {
   const id = generateRoomCode();
-  const room = new Room(io, id, { hostSocket, hostName, hostColorIdx, config: CONFIG });
+  const room = new Room(io, id, {
+    hostSocket, hostName, hostColorIdx, config: CONFIG,
+    onMatchEnd: (roomId, rounds, scores) => auth.recordMatch(roomId, rounds, scores)
+  });
   rooms.set(id, room);
   room.initializeHost(hostSocket, hostName, hostColorIdx);
   hostSocket.emit('room_created', {
@@ -99,6 +137,10 @@ function scheduleSweep() {
 
 io.on('connection', (socket) => {
   console.log('Подключение:', socket.id);
+
+  // Аккаунт по токену из handshake (io({ auth: { token } }) на клиенте)
+  const account = auth.userByToken(socket.handshake?.auth?.token);
+  socket.userId = account ? account.id : null;
 
   socket.on('create_room', ({ playerName, colorIdx } = {}) => {
     if (socket.roomId && getRoom(socket.roomId)) {

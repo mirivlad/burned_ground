@@ -26,10 +26,11 @@ class Room {
    * @param {string} id
    * @param {object} opts - { hostSocket, hostName, hostColorIdx, config }
    */
-  constructor(io, id, { hostSocket, hostName, hostColorIdx, config }) {
+  constructor(io, id, { hostSocket, hostName, hostColorIdx, config, onMatchEnd }) {
     this.io = io;
     this.id = id;
     this.config = config;              // { rounds, turnMs, reconnectMs }
+    this.onMatchEnd = onMatchEnd || null;
     this.createdAt = Date.now();
     this.destroyed = false;
 
@@ -145,11 +146,12 @@ class Room {
     return this.playerOrderIds().filter(pid => this.players[pid].isAlive);
   }
 
-  createHuman(name, colorIdx) {
+  createHuman(name, colorIdx, userId) {
     return {
       id: 'p' + Math.random().toString(36).substr(2, 9),
       name: String(name).slice(0, 20),
       colorIdx,
+      userId: userId || null,          // привязка к аккаунту (если авторизован)
       isBot: false,
       socketId: null,
       hp: 100,
@@ -197,7 +199,7 @@ class Room {
    */
   initializeHost(hostSocket, hostName, colorIdx) {
     const color = colorIdx !== undefined && !this.colorTaken(colorIdx) ? colorIdx : this.freeColorIdx();
-    const host = this.createHuman(hostName || 'Хост', color);
+    const host = this.createHuman(hostName || 'Хост', color, hostSocket.userId);
     host.socketId = hostSocket.id;
     this.players[host.id] = host;
     this.hostId = host.id;
@@ -266,7 +268,7 @@ class Room {
     if (color === null) color = this.freeColorIdx();
     slot.colorIdx = color;
 
-    const player = this.createHuman(name, color);
+    const player = this.createHuman(name, color, socket.userId);
     player.socketId = socket.id;
     this.players[player.id] = player;
     slot.playerId = player.id;
@@ -772,12 +774,29 @@ class Room {
     this.phase = 'matchEnd';
     this.clearTimers();
 
-    this.emit('match_end', {
-      finalScores: this.playerOrderIds().map(pid => {
-        const p = this.players[pid];
-        return { playerId: pid, name: p.name, kills: p.kills, totalEarned: p.totalEarned, isBot: p.isBot };
-      })
+    const finalScores = this.playerOrderIds().map(pid => {
+      const p = this.players[pid];
+      return {
+        playerId: pid, name: p.name, kills: p.kills,
+        totalEarned: p.totalEarned, isBot: p.isBot,
+        userId: p.userId || null
+      };
     });
+
+    this.emit('match_end', { finalScores });
+
+    // Запись в историю для авторизованных игроков
+    if (this.onMatchEnd) {
+      const best = finalScores.reduce((a, b) =>
+        (b.kills * 1000 + b.totalEarned) > (a.kills * 1000 + a.totalEarned) ? b : a
+      , finalScores[0]);
+      const scores = finalScores.map(s => ({ ...s, won: s === best && !s.isBot }));
+      try {
+        this.onMatchEnd(this.id, this.config.rounds, scores);
+      } catch (e) {
+        console.error('Ошибка записи матча:', e.message);
+      }
+    }
 
     this.setTimer('match', () => {
       if (this.destroyed) return;
