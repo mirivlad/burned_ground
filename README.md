@@ -83,6 +83,87 @@ npm start
 - **Танки**: чёрные гусеницы с катками, цветной корпус и полукруглая башня со стволом; цвет — из палитры комнаты
 - **Взрывы**: расширяющиеся кольца белый → жёлтый → оранжевый, комья земли, дым, тряска камеры на крупных снарядах
 
+## Развёртывание
+
+Образ публикуется на GHCR при каждом пуше в main: `ghcr.io/mirivlad/burned_ground:latest`
+(плюс теги `sha-<коммит>`), платформы `linux/amd64` и `linux/arm64`.
+
+### Docker
+
+```bash
+docker run -d \
+  --name burned-ground \
+  --restart unless-stopped \
+  -p 3000:3000 \
+  -v burned-ground-data:/app/data \
+  ghcr.io/mirivlad/burned_ground:latest
+```
+
+Или через docker-compose (файл в репозитории):
+
+```bash
+curl -O https://raw.githubusercontent.com/mirivlad/burned_ground/main/docker-compose.yml
+docker compose up -d
+```
+
+- `-v burned-ground-data:/app/data` — том под базу SQLite (профили и статистика).
+  Можно не монтировать, но тогда данные живут только внутри контейнера.
+- Переменные окружения: `PORT` (по умолчанию 3000), `BG_DATA_DIR` (по умолчанию `data`).
+
+### Portainer
+
+1. **Stacks → Add stack** → имя `burned-ground`.
+2. Выберите **Repository** → `https://github.com/mirivlad/burned_ground`, compose-путь `docker-compose.yml`
+   (или вставьте файл вручную в **Web editor**).
+3. Ничего менять не обязательно — нажмите **Deploy the stack**.
+4. Игра будет доступна на порту 3000 хоста: `http://<ip-сервера>:3000`.
+
+Альтернатива одной кнопкой: **Containers → Add container** → имя `burned-ground`,
+image `ghcr.io/mirivlad/burned_ground:latest`, **Publish a new network port** `3000:3000`,
+**Restart policy** `unless-stopped`, плюс volume `burned-ground-data:/app/data`.
+
+### Nginx (реверс-прокси)
+
+Socket.IO использует WebSocket, поэтому в конфиге обязательны заголовки `Upgrade`/`Connection`:
+
+```nginx
+server {
+    listen 80;
+    server_name tanks.example.com;
+
+    # Опционально: большие полезные нагрузки не нужны, но таймауты — да
+    client_max_body_size 10m;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+
+        # WebSocket (Socket.IO)
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Долгоживущие websocket-соединения не должны рваться по таймауту
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+    }
+}
+```
+
+Проверка и применение:
+
+```bash
+nginx -t && systemctl reload nginx
+```
+
+Если несколько инстансов за одним Nginx — используйте `map $http_upgrade $connection_upgrade`
+на уровне `http{}` вместо фиксированного `"upgrade"`. HTTPS — любой привычный способ
+(certbot: `certbot --nginx -d tanks.example.com`).
+
 ## Технологии
 
 - **Сервер**: Node.js 18+, Express, Socket.IO 4.x

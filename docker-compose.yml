@@ -1,0 +1,14 @@
+services:
+  burned-ground:
+    image: ghcr.io/mirivlad/burned_ground:latest
+    container_name: burned-ground
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+    volumes:
+      - burned-ground-data:/app/data
+    restart: unless-stopped
+
+volumes:
+  burned-ground-data:
