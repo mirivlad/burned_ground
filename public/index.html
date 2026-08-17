@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>Burned Ground - Tank Battle</title>
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -127,7 +127,6 @@
 
       <div id="turn-panel">
         <div id="current-player">Ход: -</div>
-        <div id="wind-indicator">Ветер: <span id="wind-value">0</span></div>
         <div id="timer">Время: <span id="time-value">60</span>с</div>
       </div>
 
@@ -142,20 +141,25 @@
           <input type="range" id="power-slider" min="0" max="100" value="70">
         </div>
         <div class="input-hint">
-          &larr;&rarr; угол &middot; &uarr;&darr; мощность &middot; SHIFT — шаг 10 &middot; ПРОБЕЛ выстрел<br>
+          &larr;&rarr; угол &middot; &uarr;&darr; мощность &middot; SHIFT — шаг 10 &middot; ПРОБЕЛ выстрел &middot; TAB — следующее оружие<br>
           значения можно вводить числом
         </div>
       </div>
 
       <div id="inventory-panel">
-        <h2>Инвентарь</h2>
-        <div id="inventory-list"></div>
+        <h2>Боезапас</h2>
+        <div id="active-weapon"></div>
+        <button id="btn-open-inventory">ИНВЕНТАРЬ [I]</button>
       </div>
 
       <div id="shop-panel">
         <h2>Магазин</h2>
         <div id="money-display">Деньги: $<span id="money-value">500</span></div>
         <button id="btn-open-shop">МАГАЗИН [B]</button>
+      </div>
+
+      <div id="game-actions-panel">
+        <button id="btn-leave-game">ПОКИНУТЬ МАТЧ</button>
       </div>
 
       <div id="chat-panel">
@@ -208,6 +212,18 @@
     </div>
   </div>
 
+  <!-- Модальный инвентарь -->
+  <div id="inventory-modal">
+    <div id="inventory-box">
+      <div id="inventory-header">
+        <span id="inventory-title">ИНВЕНТАРЬ</span>
+        <button id="btn-close-inventory">ЗАКРЫТЬ [ESC]</button>
+      </div>
+      <div id="inventory-grid"></div>
+      <div id="inventory-hint">Выберите снаряд кликом или клавишей TAB. Снаряжение применяется в свой ход.</div>
+    </div>
+  </div>
+
   <!-- Пауза между раундами -->
   <div id="interround-overlay">
     <div id="interround-box">
@@ -229,7 +245,8 @@
   <script src="/shared/weapons.js"></script>
   <script src="/shared/items.js"></script>
   <script src="/shared/physics.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
+  <!-- Phaser лежит в образе: падение CDN или закрытая сеть не должны убивать игру -->
+  <script src="vendor/phaser.min.js"></script>
   <script src="src/utils/Network.js"></script>
   <script src="src/utils/InputHandler.js"></script>
   <script src="src/utils/Sound.js"></script>

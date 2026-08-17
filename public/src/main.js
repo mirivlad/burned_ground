@@ -16,6 +16,12 @@ const config = {
     window.GameScene,
     window.UIScene
   ],
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH,
+    width: window.CONSTANTS.MAP_WIDTH,
+    height: window.CONSTANTS.MAP_HEIGHT
+  },
   render: {
     pixelArt: true,
     antialias: false,

@@ -1,7 +1,26 @@
 /**
- * Танк в стиле Scorched Earth: чёрные гусеницы с катками,
- * цветной корпус, полукруглая башня и ствол. Цвет — из палитры комнаты.
+ * Танк в стиле Scorched Earth: чёрные гусеницы с катками, цветной корпус,
+ * башня и ствол. Цвет — из палитры комнаты.
+ *
+ * Корпусов несколько: модель выбирается детерминированно по playerId, чтобы
+ * в бою на десятерых танки различались не только цветом. Убитый танк
+ * оставляет обгоревший остов до конца раунда — как воронка в оригинале.
  */
+
+// Силуэты корпусов: отличаются шириной, высотой и формой башни
+const HULL_MODELS = [
+  { name: 'штурмовой', hullH: 7,  turretR: 7, turretY: -2, hullInset: 2, sloped: false },
+  { name: 'тяжёлый',   hullH: 9,  turretR: 8, turretY: -1, hullInset: 0, sloped: false },
+  { name: 'лёгкий',    hullH: 6,  turretR: 6, turretY: -2, hullInset: 4, sloped: true },
+  { name: 'самоходка', hullH: 8,  turretR: 5, turretY: -3, hullInset: 1, sloped: true }
+];
+
+function modelFor(playerId) {
+  let hash = 0;
+  const s = String(playerId || '');
+  for (let i = 0; i < s.length; i++) hash = (hash * 31 + s.charCodeAt(i)) & 0x7fffffff;
+  return HULL_MODELS[hash % HULL_MODELS.length];
+}
 
 class Tank {
   constructor(scene, x, y, playerId, color, name) {
@@ -16,6 +35,8 @@ class Tank {
     this.shield = 0;
     this.isAlive = true;
     this.isCurrent = false;
+    this.model = modelFor(playerId);
+    this.muzzleFlashUntil = 0;
 
     this.width = window.CONSTANTS.PHYSICS.tankWidth;
     this.height = window.CONSTANTS.PHYSICS.tankHeight;
@@ -23,7 +44,6 @@ class Tank {
     this.graphics = scene.add.graphics();
 
     if (this.name) {
-      const css = '#' + color.toString(16).padStart(6, '0');
       this.nameText = scene.add.text(this.x, this.y - 30, this.name, {
         fontFamily: 'Courier New',
         fontSize: '11px',
@@ -39,14 +59,17 @@ class Tank {
 
   draw() {
     this.graphics.clear();
-    if (!this.isAlive) return;
+
+    if (!this.isAlive) {
+      this.drawWreck();
+      return;
+    }
 
     const g = this.graphics;
     const c = this.color;
+    const m = this.model;
     const dark = 0x1a1a1a;
-
-    // Пиксельная сетка: блоки по 2px для DOS-вида
-    const px = 2;
+    const px = 2;   // пиксельная сетка для DOS-вида
 
     // Гусеницы: чёрная база + светлые катки
     const treadW = this.width + 6;
@@ -62,24 +85,37 @@ class Tank {
       g.fillRect(treadX + dx, treadY + 5, px, px);
     }
 
-    // Корпус: цвет игрока с чёрной обводкой
-    const hullW = this.width - 2;
-    const hullH = 7;
+    // Корпус: цвет игрока с чёрной обводкой, форма зависит от модели
+    const hullW = this.width - m.hullInset;
+    const hullH = m.hullH;
     const hullX = Math.round(this.x - hullW / 2);
     const hullY = treadY - hullH;
 
-    g.lineStyle(1, 0x000000, 1);
     g.fillStyle(c, 1);
-    g.fillRect(hullX, hullY, hullW, hullH);
-    g.strokeRect(hullX, hullY, hullW, hullH);
+    g.lineStyle(1, 0x000000, 1);
+
+    if (m.sloped) {
+      // Скошенная лобовая деталь
+      g.beginPath();
+      g.moveTo(hullX + 4, hullY);
+      g.lineTo(hullX + hullW - 4, hullY);
+      g.lineTo(hullX + hullW, hullY + hullH);
+      g.lineTo(hullX, hullY + hullH);
+      g.closePath();
+      g.fillPath();
+      g.strokePath();
+    } else {
+      g.fillRect(hullX, hullY, hullW, hullH);
+      g.strokeRect(hullX, hullY, hullW, hullH);
+    }
 
     // Башня: полукруг того же цвета
-    const turretY = hullY - 2;
+    const turretY = hullY + m.turretY;
     g.fillStyle(c, 1);
-    g.slice(this.x, turretY, 7, Math.PI, Math.PI * 2, false);
+    g.slice(this.x, turretY, m.turretR, Math.PI, Math.PI * 2, false);
     g.fillPath();
     g.lineStyle(1, 0x000000, 1);
-    g.slice(this.x, turretY, 7, Math.PI, Math.PI * 2, false);
+    g.slice(this.x, turretY, m.turretR, Math.PI, Math.PI * 2, false);
     g.strokePath();
 
     // Ствол: чёрный контур + цветная сердцевина
@@ -100,6 +136,16 @@ class Tank {
     g.moveTo(this.x, turretY);
     g.lineTo(bx, by);
     g.strokePath();
+
+    // Вспышка у среза ствола сразу после выстрела
+    if (this.scene.time.now < this.muzzleFlashUntil) {
+      const fx = this.x - Math.cos(a) * (barrelLen + 4);
+      const fy = turretY - Math.sin(a) * (barrelLen + 4);
+      g.fillStyle(0xffffcc, 0.95);
+      g.fillCircle(fx, fy, 5);
+      g.fillStyle(0xffaa33, 0.8);
+      g.fillCircle(fx, fy, 3);
+    }
 
     // Купол щита: полукруг над танком, ярче при большем запасе прочности
     if (this.shield > 0) {
@@ -126,6 +172,35 @@ class Tank {
     const hpColor = ratio > 0.5 ? 0x33ff66 : (ratio > 0.25 ? 0xffd24a : 0xff3333);
     g.fillStyle(hpColor, 1);
     g.fillRect(this.x - barW / 2, barY, barW * ratio, 4);
+  }
+
+  /** Обгоревший остов на месте уничтоженного танка */
+  drawWreck() {
+    const g = this.graphics;
+    const wreckW = this.width;
+    const wreckX = Math.round(this.x - wreckW / 2);
+    const wreckY = Math.round(this.y - 6);
+
+    g.fillStyle(0x241c14, 1);
+    g.fillRect(wreckX, wreckY, wreckW, 6);
+    g.fillStyle(0x120e0a, 1);
+    g.fillRect(wreckX + 4, wreckY - 3, wreckW - 12, 3);
+
+    // Погнутый ствол в грунте
+    g.lineStyle(3, 0x1a1a1a, 1);
+    g.beginPath();
+    g.moveTo(this.x + 2, wreckY);
+    g.lineTo(this.x + 14, wreckY - 7);
+    g.strokePath();
+  }
+
+  /** Вспышка выстрела: гаснет сама через 120мс */
+  flash() {
+    this.muzzleFlashUntil = this.scene.time.now + 120;
+    this.draw();
+    this.scene.time.delayedCall(140, () => {
+      if (this.graphics && this.graphics.scene) this.draw();
+    });
   }
 
   setPosition(x, y) {

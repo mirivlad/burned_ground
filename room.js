@@ -17,6 +17,8 @@ const {
 const {
   calculateProjectileTrajectory,
   calculateExplosionDamage,
+  distanceToTankHitbox,
+  projectileFlightMs,
   calculateFallDamage,
   updateTankPhysics,
   simulateMirv
@@ -294,6 +296,8 @@ class Room {
       hp: p.hp,
       shield: p.shield || 0,
       money: p.money,
+      angle: p.angle,
+      power: p.power,
       isAlive: p.isAlive,
       connected: p.connected,
       kills: p.kills
@@ -612,6 +616,13 @@ class Room {
 
     if (p.disconnectTimer) clearTimeout(p.disconnectTimer);
 
+    // Позиция в очереди хода запоминается до удаления: после splice индексы
+    // сдвигаются, и без поправки ход уедет не к тому игроку
+    const orderBefore = this.playerOrderIds();
+    const removedIndex = orderBefore.indexOf(playerId);
+    const wasCurrentTurn = this.phase === 'playing' &&
+      orderBefore[this.currentPlayerIndex] === playerId;
+
     const slot = this.slots.find(s => s.playerId === playerId);
     if (slot) slot.playerId = null;      // слот освобождается (человек или бот)
     if (p.isBot && slot) {
@@ -622,6 +633,15 @@ class Room {
 
     const ti = this.tanks.findIndex(t => t.playerId === playerId);
     if (ti !== -1) this.tanks.splice(ti, 1);
+
+    // Ушедший стоял раньше текущего — очередь сдвинулась влево
+    if (removedIndex !== -1 && removedIndex < this.currentPlayerIndex) {
+      this.currentPlayerIndex--;
+    }
+    const orderAfter = this.playerOrderIds();
+    if (orderAfter.length > 0 && this.currentPlayerIndex >= orderAfter.length) {
+      this.currentPlayerIndex = 0;
+    }
 
     // Хост ушел: передаем права
     if (this.hostId === playerId) {
@@ -646,6 +666,16 @@ class Room {
       const alive = this.aliveIds();
       if (alive.length <= 1) {
         this.endRound(alive[0] || null);
+        return;
+      }
+
+      // Ушел тот, чей был ход: таймер хода привязан к его playerId и больше
+      // не сработает — без этого матч зависал до конца времен
+      if (wasCurrentTurn && this.turnPhase === 'aiming') {
+        this.clearTimer('turn');
+        this.clearTimer('bot');
+        this.turnPhase = 'idle';
+        this.startTurn();
       }
     }
   }
@@ -1242,7 +1272,10 @@ class Room {
     angle = Math.max(0, Math.min(180, Number(angle) || 0));
     power = Math.max(0, Math.min(100, Number(power) || 0));
 
+    // Отказ обязан дойти до клиента: он держит выстрел заблокированным
+    // до ответа сервера, иначе игрок остается без хода до конца таймера
     if (!weapon || !(p.inventory[weaponId] > 0 || weapon.infinite)) {
+      this.emitTo(playerId, 'error', { message: 'Нет снарядов этого типа' });
       return { error: 'Нет снарядов' };
     }
 
@@ -1253,10 +1286,14 @@ class Room {
     }
 
     const tank = this.tanks.find(t => t.playerId === playerId);
-    if (!tank) return { error: 'Танк уничтожен' };
+    if (!tank) {
+      this.emitTo(playerId, 'error', { message: 'Танк уничтожен' });
+      return { error: 'Танк уничтожен' };
+    }
 
     p.angle = angle;
     p.power = power;
+    this.emitPlayers();
 
     // Автор текущего выстрела: ему засчитываются падения, вызванные его взрывом
     this.lastShooterId = playerId;
@@ -1311,9 +1348,45 @@ class Room {
         flows: null,
         stepMs: ROLL_STEP_MS
       };
+    } else if (weapon.effect === 'leapfrog') {
+      // Скачет дальше по ходу полета: направление берем из последнего шага
+      const prev = trajectory[Math.max(0, trajectory.length - 2)];
+      const dir = impact.x >= prev.x ? 1 : -1;
+      const hops = weapon.hops || 3;
+
+      for (let i = 0; i < hops; i++) {
+        const x = Math.round(impact.x + dir * i * (weapon.hopDistance || 55));
+        if (x < 0 || x >= MAP_WIDTH) break;
+        impacts.push({ atMs: i * 260, x, snap: true });
+      }
+    } else if (weapon.effect === 'funky') {
+      // Рассыпается веером: заряды ложатся на грунт вокруг точки падения
+      const count = weapon.cluster || 6;
+      const spread = weapon.spread || 75;
+
+      for (let i = 0; i < count; i++) {
+        const offset = Math.round((i / (count - 1) - 0.5) * 2 * spread);
+        const x = Math.round(impact.x + offset);
+        if (x < 0 || x >= MAP_WIDTH) continue;
+        impacts.push({ atMs: 100 + i * 90, x, snap: true });
+      }
+    } else if (weapon.effect === 'digger') {
+      // Прогрызает шахту вниз: серия взрывов по вертикали
+      const depth = weapon.depth || 4;
+      const x = Math.max(0, Math.min(MAP_WIDTH - 1, Math.round(impact.x)));
+
+      for (let i = 0; i < depth; i++) {
+        impacts.push({ atMs: i * 130, x, y: impact.y + i * weapon.radius });
+      }
     }
 
     const missedMap = impact.y > 7000 || impact.x < 0 || impact.x >= MAP_WIDTH;
+
+    // Момент, когда сервер начнет разрешать попадание. Клиент подгоняет под
+    // него анимацию, иначе взрыв и снаряд разъезжаются.
+    const flightMs = special && special.type === 'mirv'
+      ? projectileFlightMs(special.main.length / 2)
+      : projectileFlightMs(trajectory.length);
 
     this.emit('shot', {
       playerId,
@@ -1323,16 +1396,12 @@ class Room {
       startX,
       startY,
       weaponId,
-      trajectoryDurationMs: trajectory.length * 16.67,
+      trajectoryDurationMs: projectileFlightMs(trajectory.length),
+      flightMs,
       special
     });
 
     this.turnPhase = 'resolving';
-
-    // Полет основного снаряда (или до распада MIRV)
-    const flightMs = special && special.type === 'mirv'
-      ? Math.min(special.main.length / 2 * 16.67, 8000)
-      : Math.min(trajectory.length * 16.67, 8000);
 
     this.setTimer('resolve', () => {
       if (this.destroyed || this.phase !== 'playing') return;
@@ -1373,12 +1442,13 @@ class Room {
           const other = this.players[otherTank.playerId];
           if (!other || !other.isAlive) continue;
 
-          const dx = otherTank.x - ix;
-          const dy = (otherTank.y - PHYSICS.tankHeight / 2) - iy;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const effectiveRadius = weapon.radius + PHYSICS.tankWidth / 2;
-
-          const dmg = calculateExplosionDamage(dist, effectiveRadius, weapon.damage);
+          const dist = distanceToTankHitbox({
+            impactX: ix,
+            impactY: iy,
+            tankX: otherTank.x,
+            tankGroundY: otherTank.y
+          });
+          const dmg = calculateExplosionDamage(dist, weapon.radius, weapon.damage);
           if (dmg > 0) damages.push({ playerId: otherTank.playerId, damage: dmg });
         }
 
@@ -1400,19 +1470,27 @@ class Room {
         }
       };
 
+      // Заряды, ложащиеся на грунт (прыжки, кассета), берут высоту в момент
+      // взрыва: предыдущие попадания уже изменили рельеф
+      const impactY = (im) => {
+        if (!im.snap) return im.y;
+        const x = Math.max(0, Math.min(MAP_WIDTH - 1, Math.round(im.x)));
+        return this.terrain[x];
+      };
+
       impacts
         .slice()
         .sort((a, b) => a.atMs - b.atMs)
         .forEach((im, i) => {
           const isLast = i === impacts.length - 1;
           if (im.atMs <= 0) {
-            applyImpact(im.x, im.y);
+            applyImpact(im.x, impactY(im));
             if (isLast) this.finishShot(weapon, playerId);
             return;
           }
           this.scheduleImpact(() => {
             if (this.destroyed || this.phase !== 'playing') return;
-            applyImpact(im.x, im.y);
+            applyImpact(im.x, impactY(im));
             if (isLast) this.finishShot(weapon, playerId);
           }, im.atMs);
         });

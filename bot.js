@@ -95,27 +95,38 @@ function decideShot({ difficulty, heights, wind, selfTank, selfHp, enemyTanks, m
     Math.round(solution.power + (Math.random() * 2 - 1) * noise.power)
   ));
 
-  // Выбор оружия по экономике и сложности
-  let weaponId = BASE_WEAPON_ID;
-
+  // Выбор оружия: сначала то, что уже есть в трюме, иначе покупка по деньгам.
+  // Порядок — от тяжелого к легкому, дорогое доступно только сильным ботам.
   const has = (id) => (inventory[id] || 0) > 0;
   const nukeTh = cfg.nukeThreshold[difficulty];
   const buyTh = cfg.buyThreshold[difficulty];
 
-  if (has('nuke')) {
-    weaponId = 'nuke';
-  } else if (has('heavy_shot')) {
-    weaponId = 'heavy_shot';
-  } else if (money >= nukeTh) {
-    weaponId = 'nuke'; // купим перед выстрелом
-  } else if (money >= buyTh && money >= WEAPONS.heavy_shot.price) {
-    weaponId = 'heavy_shot';
+  const arsenal = [
+    { id: 'deaths_head', buyFrom: nukeTh * 2.5 },
+    { id: 'nuke',        buyFrom: nukeTh },
+    { id: 'baby_nuke',   buyFrom: nukeTh * 0.8 },
+    { id: 'heavy_shot',  buyFrom: buyTh },
+    { id: 'missile',     buyFrom: buyTh }
+  ];
+
+  let weaponId = BASE_WEAPON_ID;
+
+  const owned = arsenal.find(w => has(w.id));
+  if (owned) {
+    weaponId = owned.id;
+  } else {
+    const affordable = arsenal.find(w => {
+      const weapon = WEAPONS[w.id];
+      return weapon && money >= w.buyFrom && money >= weapon.price;
+    });
+    if (affordable) weaponId = affordable.id;
   }
 
-  // Не стреляем нукой, если взрыв задует себя (иначе самоубийство)
-  if (weaponId === 'nuke') {
+  // Не стреляем тяжелым, если взрыв заденет себя (иначе самоубийство)
+  const chosen = WEAPONS[weaponId];
+  if (chosen && chosen.radius > 40) {
     const selfDist = Math.hypot(solution.impact.x - selfTank.x, solution.impact.y - (selfTank.y - 8));
-    if (selfDist < WEAPONS.nuke.radius * 1.1) {
+    if (selfDist < chosen.radius * 1.1) {
       weaponId = has('heavy_shot') ? 'heavy_shot' : BASE_WEAPON_ID;
     }
   }

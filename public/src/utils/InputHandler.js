@@ -17,6 +17,7 @@ class InputHandler {
     this.power = 70;
     this.onFireCallback = null;
     this.onAngleChangeCallback = null;
+    this.fireLocked = false;
 
     this.setupKeyboard();
     this.setupSliders();
@@ -25,8 +26,19 @@ class InputHandler {
 
   setupKeyboard() {
     document.addEventListener('keydown', (e) => {
-      // Стрелки — только если не в фокусе поле ввода
-      if (document.activeElement.tagName === 'INPUT') return;
+      const active = document.activeElement;
+      const tag = active?.tagName;
+      const type = String(active?.type || '').toLowerCase();
+      const isAimInput = active?.id === 'angle-value' || active?.id === 'power-value';
+
+      // Ползунки угла и мощности держат фокус после клика мышью. Раньше они
+      // считались полем ввода, и пробел молча проглатывался — выстрел
+      // «срабатывал не с первого раза».
+      const isSlider = type === 'range';
+      const isTextEntry = (tag === 'INPUT' && !isSlider && !isAimInput) || tag === 'TEXTAREA';
+
+      // Текстовые поля (чат, логин) получают ввод целиком.
+      if (isTextEntry) return;
 
       // Блокируем прокрутку страницы стрелками
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
@@ -51,9 +63,9 @@ class InputHandler {
           this.setPower(this.power - step);
           break;
         case 'Space':
-          if (this.onFireCallback) {
-            this.onFireCallback(this.angle, this.power);
-          }
+          // Ползунок отдает фокус: дальше стрелки должны крутить ствол
+          if (isSlider) active.blur();
+          if (!e.repeat) this.requestFire();
           break;
       }
     });
@@ -146,8 +158,19 @@ class InputHandler {
     this.onAngleChangeCallback = callback;
   }
 
+  requestFire() {
+    if (this.fireLocked || !this.onFireCallback) return;
+    const accepted = this.onFireCallback(this.angle, this.power);
+    if (accepted !== false) this.fireLocked = true;
+  }
+
+  unlockFire() {
+    this.fireLocked = false;
+  }
+
   // Сброс состояния
   reset() {
+    this.unlockFire();
     this.setAngle(90);
     this.setPower(70);
   }

@@ -373,3 +373,45 @@ server.listen(PORT, () => {
   console.log(`Откройте http://localhost:${PORT} в браузере`);
   console.log(`Раундов: ${CONFIG.rounds}, ход: ${CONFIG.turnMs / 1000}c, реконнект: ${CONFIG.reconnectMs / 1000}c`);
 });
+
+/**
+ * Корректное завершение: docker stop шлет SIGTERM и ждет 10 секунд.
+ * Игрокам сообщаем, комнаты гасим (иначе останутся висеть таймеры),
+ * базу закрываем — WAL должен быть сброшен на диск.
+ */
+let shuttingDown = false;
+
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`Получен ${signal}, останавливаемся...`);
+
+  io.emit('server_shutdown', { message: 'Сервер перезапускается' });
+
+  for (const [id, room] of rooms) {
+    room.destroy();
+    rooms.delete(id);
+  }
+  if (sweepTimer) clearInterval(sweepTimer);
+
+  io.close(() => {
+    server.close(() => {
+      try {
+        auth.db.close();
+      } catch (e) {
+        console.error('Ошибка закрытия базы:', e.message);
+      }
+      console.log('Остановлено штатно');
+      process.exit(0);
+    });
+  });
+
+  // Страховка: если сокеты не закрылись, не висим до SIGKILL
+  setTimeout(() => {
+    console.warn('Штатное завершение затянулось, выходим принудительно');
+    process.exit(0);
+  }, 8000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

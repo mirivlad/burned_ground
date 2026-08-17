@@ -30,6 +30,29 @@
     return Math.max(PH.projectileMinSpeed, (p / 100) * PH.projectileMaxSpeed);
   }
 
+  /**
+   * Длительность визуального и серверного полета. Точек N — перемещений N - 1:
+   * первая точка уже показана в момент выстрела.
+   */
+  function projectileFlightMs(pointCount) {
+    return Math.max(0, (Math.max(0, Number(pointCount) || 0) - 1) * PH.projectileStepMs);
+  }
+
+  /**
+   * Кратчайшее расстояние от эпицентра до прямоугольного силуэта танка.
+   * Попадание в сам танк имеет дистанцию 0 и потому наносит полный базовый урон.
+   */
+  function distanceToTankHitbox({ impactX, impactY, tankX, tankGroundY }) {
+    const halfWidth = PH.tankWidth / 2;
+    const left = tankX - halfWidth;
+    const right = tankX + halfWidth;
+    const top = tankGroundY - PH.tankHeight;
+    const bottom = tankGroundY;
+    const nearestX = Math.max(left, Math.min(right, impactX));
+    const nearestY = Math.max(top, Math.min(bottom, impactY));
+    return Math.hypot(impactX - nearestX, impactY - nearestY);
+  }
+
   function calculateProjectileTrajectory({ startX, startY, angle, power, wind, heights }) {
     const trajectory = [];
 
@@ -236,8 +259,10 @@
 
   const PhysicsAPI = {
     speedFromPower,
+    projectileFlightMs,
     calculateProjectileTrajectory,
     calculateExplosionDamage,
+    distanceToTankHitbox,
     calculateFallDamage,
     updateTankPhysics,
     checkTankSupport,

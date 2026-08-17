@@ -13,16 +13,6 @@ body {
   height: 100vh;
 }
 
-body::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background: repeating-linear-gradient(0deg,
-    rgba(0,0,0,0.12) 0px, rgba(0,0,0,0.12) 1px, transparent 1px, transparent 3px);
-  pointer-events: none;
-  z-index: 9000;
-}
-
 .hidden { display: none !important; }
 
 button {
@@ -330,26 +320,28 @@ input[type="text"]::placeholder { color: #3a5a42; text-transform: uppercase; }
 
 /* ============ ИГРОВОЙ ЭКРАН ============ */
 
-#game-container { display: none; }
+#game-container { position: fixed; inset: 0; display: none; overflow: hidden; min-width: 0; min-height: 0; }
 #game-container.visible { display: flex; }
 
 #canvas-wrapper {
   flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   background-color: #000;
   display: flex; align-items: center; justify-content: center;
   overflow: hidden;
 }
 
-#gameCanvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+#gameCanvas { image-rendering: pixelated; image-rendering: crisp-edges; max-width: 100%; max-height: 100%; }
 
 #sidebar {
-  flex: 0 0 230px; min-width: 230px; max-width: 230px;
+  flex: 0 0 clamp(210px, 18vw, 260px); min-width: 0;
   background: linear-gradient(180deg, #0d1a10 0%, #060a07 100%);
   border-left: 4px solid #3a9d23;
-  padding: 10px; overflow-y: auto; font-size: 12px; height: 100%;
+  padding: 8px; overflow-y: auto; overflow-x: hidden; font-size: 12px; height: 100%;
 }
 
-#players-panel, #turn-panel, #weapon-panel, #inventory-panel, #shop-panel, #chat-panel {
+#players-panel, #turn-panel, #weapon-panel, #inventory-panel, #shop-panel, #game-actions-panel, #chat-panel {
   background-color: rgba(0,0,0,0.5);
   border: 1px solid #2d5237;
   padding: 8px; margin-bottom: 10px;
@@ -369,7 +361,7 @@ h2 {
   border-left: 3px solid #666;
 }
 .player-item .p-color { width: 10px; height: 10px; flex-shrink: 0; }
-.player-item .p-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.player-item .p-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .player-item.alive { border-left-color: #3a9d23; }
 .player-item.dead { border-left-color: #ff3333; opacity: 0.45; }
 .player-item.offline .p-name::after { content: ' [offline]'; color: #ff5555; font-size: 10px; }
@@ -377,10 +369,12 @@ h2 {
 .player-item.bot-item .p-name::after { content: ' [бот]'; color: #ff77ff; font-size: 10px; }
 .p-guest { color: #888; font-size: 10px; margin-left: 4px; }
 
+.player-hp, .player-money { flex: 0 0 auto; white-space: nowrap; }
 .player-hp { color: #ff6666; font-size: 11px; }
 .player-money { color: #ffd700; font-size: 11px; }
 
-#wind-indicator, #timer { margin-top: 4px; font-size: 11px; }
+/* Ветер показывается только на игровом поле — в сайдбаре он дублировался */
+#timer { margin-top: 6px; font-size: 11px; }
 
 #current-player { font-weight: bold; color: #ffd24a; text-align: center; padding: 4px; }
 #current-player.my-turn { color: #33ff66; animation: flash 1.2s infinite; }
@@ -430,7 +424,7 @@ input[type="range"]::-webkit-slider-thumb {
 .shop-item-desc { font-size: 10px; color: #8aa88f; }
 
 /* Зритель */
-#sidebar.spectator #weapon-panel, #sidebar.spectator #inventory-panel, #sidebar.spectator #shop-panel { display: none; }
+#sidebar.spectator #weapon-panel, #sidebar.spectator #inventory-panel, #sidebar.spectator #shop-panel, #sidebar.spectator #game-actions-panel { display: none; }
 #sidebar.spectator #turn-panel::after {
   content: 'РЕЖИМ НАБЛЮДАТЕЛЯ'; display: block; color: #ff77ff;
   font-size: 10px; text-align: center; margin-top: 6px; letter-spacing: 2px;
@@ -442,6 +436,17 @@ input[type="range"]::-webkit-slider-thumb {
   letter-spacing: 2px;
 }
 
+#inventory-panel button, #game-actions-panel button { width: 100%; }
+#active-weapon {
+  min-height: 30px; margin-bottom: 7px; padding: 5px 6px;
+  border: 1px solid #66ff66; background: rgba(51,255,102,0.12);
+  color: #ffffff; font-size: 11px; text-align: center; overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+#active-weapon .active-count { color: #ffd24a; margin-left: 6px; }
+#btn-leave-game { color: #ff9999; border-color: #aa3333; }
+#btn-leave-game:hover { color: #fff; background: #8a2626; }
+
 /* ============ МОДАЛЬНЫЙ МАГАЗИН ============ */
 
 #shop-modal {
@@ -451,8 +456,25 @@ input[type="range"]::-webkit-slider-thumb {
 }
 #shop-modal.visible { display: flex; }
 
+#inventory-modal {
+  position: fixed; inset: 0; z-index: 6000;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+}
+#inventory-modal.visible { display: flex; }
+
 #shop-box {
   width: 780px; max-width: 94vw; max-height: 90vh;
+  display: flex; flex-direction: column;
+  border: 2px double #33ff66;
+  box-shadow: 0 0 40px rgba(51, 255, 102, 0.25);
+  background: #050a06;
+  padding: 18px 24px;
+  color: #9dffb0;
+}
+
+#inventory-box {
+  width: 620px; max-width: 94vw; max-height: 90vh;
   display: flex; flex-direction: column;
   border: 2px double #33ff66;
   box-shadow: 0 0 40px rgba(51, 255, 102, 0.25);
@@ -465,6 +487,25 @@ input[type="range"]::-webkit-slider-thumb {
   display: flex; align-items: center; gap: 14px;
   border-bottom: 1px solid #2d5237;
   padding-bottom: 10px; margin-bottom: 14px;
+}
+
+#inventory-header {
+  display: flex; align-items: center; gap: 14px;
+  border-bottom: 1px solid #2d5237;
+  padding-bottom: 10px; margin-bottom: 14px;
+}
+#inventory-title { font-size: 20px; color: #33ff66; letter-spacing: 6px; font-weight: bold; }
+#btn-close-inventory { margin-left: auto; font-size: 10px; }
+#inventory-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; overflow-y: auto; padding: 2px; }
+#inventory-hint { margin-top: 12px; text-align: center; font-size: 10px; color: #4a7a56; letter-spacing: 1px; }
+#inventory-grid .inventory-item { margin: 0; padding: 10px; }
+
+@media (max-width: 900px) {
+  #sidebar { flex-basis: 190px; padding: 6px; }
+  #players-panel, #turn-panel, #weapon-panel, #inventory-panel, #shop-panel, #game-actions-panel, #chat-panel { padding: 6px; margin-bottom: 6px; }
+  #chat-panel .chat-log { height: 72px; }
+  .player-money { display: none; }
+  #inventory-grid { grid-template-columns: 1fr; }
 }
 
 #shop-title { font-size: 20px; color: #33ff66; letter-spacing: 6px; font-weight: bold; }

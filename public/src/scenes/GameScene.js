@@ -8,6 +8,8 @@ class GameScene extends Phaser.Scene {
     super({ key: 'GameScene' });
 
     this.tanks = {};          // playerId -> Tank
+    this.wrecks = {};         // playerId -> Tank (остов убитого, живет до конца раунда)
+    this.activeShots = [];    // снаряды в полете: позиция считается по времени в update()
     this.terrain = null;
     this.sky = null;
     this.players = {};        // id -> player info (с colorIdx)
@@ -74,12 +76,14 @@ class GameScene extends Phaser.Scene {
     // Шкала — из настроек комнаты: хост мог задать свой предел ветра
     const maxWind = this.maxWind || window.CONSTANTS.GAME.maxWind;
     const cx = W / 2;
-    const y = 26;
+    const y = 25;
     const len = Math.round((Math.abs(wind) / maxWind) * 55);
 
     this.windGfx = this.add.graphics();
-    this.windGfx.fillStyle(0x000000, 0.45);
-    this.windGfx.fillRect(cx - 100, y - 14, 200, 28);
+    this.windGfx.fillStyle(0x001006, 0.82);
+    this.windGfx.fillRect(cx - 120, y - 16, 240, 54);
+    this.windGfx.lineStyle(1, 0x66ff66, 0.75);
+    this.windGfx.strokeRect(cx - 120, y - 16, 240, 54);
 
     if (Math.abs(wind) < 0.05) {
       // Штиль — точка
@@ -105,12 +109,13 @@ class GameScene extends Phaser.Scene {
       this.windGfx.fillPath();
     }
 
-    this.windText = this.add.text(cx, y, `WIND ${wind.toFixed(1)}`, {
+    const direction = Math.abs(wind) < 0.05 ? '·' : (wind > 0 ? '→→' : '←←');
+    this.windText = this.add.text(cx, y + 18, `ВЕТЕР ${direction} ${Math.abs(wind).toFixed(1)}`, {
       fontFamily: 'Courier New',
-      fontSize: '13px',
-      color: '#ffffff',
+      fontSize: '14px',
+      color: '#ffffcc',
       stroke: '#000000',
-      strokeThickness: 3
+      strokeThickness: 2
     });
     this.windText.setOrigin(0.5);
   }
@@ -172,29 +177,83 @@ class GameScene extends Phaser.Scene {
   }
 
   /**
-   * Анимация точки по полилинии от сервера (плоский массив [x,y,x,y,...]).
-   * 1 точка = stepMs. Возвращает объект снаряда.
+   * Анимация снаряда по точкам, привязанная к часам сцены.
+   *
+   * Раньше шаг задавался через time.addEvent, но TimerEvent не может
+   * сработать чаще кадра: шаг 22мс на 60fps фактически превращался в 33мс,
+   * снаряд отставал в полтора раза, и взрыв успевал прогреметь до его
+   * прилета. По времени позиция считается точно при любом FPS, а пропущенные
+   * при просадке кадров точки дорисовываются в след, чтобы не было разрывов.
+   *
+   * @returns {{endsAt:number}|null}
    */
-  animatePolyline(flat, stepMs, colorNum, radius = 3) {
+  animatePoints(points, stepMs, colorNum, radius = 3, options = {}) {
+    if (!points || points.length < 2) return null;
+
+    const dot = this.add.circle(points[0].x, points[0].y, radius, colorNum);
+    const shot = {
+      points,
+      stepMs,
+      dot,
+      startedAt: this.time.now,
+      endsAt: this.time.now + (points.length - 1) * stepMs,
+      lastIdx: 0,
+      trail: options.trail || null,
+      trailMode: options.trailMode || null,
+      keepDot: !!options.keepDot
+    };
+
+    this.activeShots.push(shot);
+    return shot;
+  }
+
+  /** Полилиния от сервера приходит плоским массивом [x,y,x,y,...] */
+  animatePolyline(flat, stepMs, colorNum, radius = 3, options = {}) {
     if (!flat || flat.length < 4) return null;
 
-    const dot = this.add.circle(flat[0], flat[1], radius, colorNum);
-    let i = 2;
+    const points = [];
+    for (let i = 0; i + 1 < flat.length; i += 2) {
+      points.push({ x: flat[i], y: flat[i + 1] });
+    }
 
-    this.time.addEvent({
-      delay: stepMs,
-      repeat: Math.floor(flat.length / 2),
-      callback: () => {
-        if (i + 1 < flat.length) {
-          dot.setPosition(flat[i], flat[i + 1]);
-          i += 2;
+    return this.animatePoints(points, stepMs, colorNum, radius, options);
+  }
+
+  update(time) {
+    if (!this.activeShots || this.activeShots.length === 0) return;
+
+    for (let i = this.activeShots.length - 1; i >= 0; i--) {
+      const shot = this.activeShots[i];
+      const last = shot.points.length - 1;
+      const idx = Math.min(last, Math.max(0, Math.floor((time - shot.startedAt) / shot.stepMs)));
+
+      if (shot.trail) {
+        for (let k = shot.lastIdx + 1; k <= idx; k++) {
+          const p = shot.points[k];
+          if (shot.trailMode === 'smoke') {
+            if (k % 5 !== 0) continue;
+            shot.trail.fillStyle(0xcccccc, 0.85);
+            shot.trail.fillCircle(p.x, p.y, 2);
+          } else {
+            shot.trail.fillStyle(0xffffff, 0.25);
+            shot.trail.fillCircle(p.x, p.y, 1);
+          }
         }
       }
-    });
 
-    // Живет до конца полилинии
-    this.time.delayedCall((flat.length / 2) * stepMs + 200, () => dot.destroy());
-    return dot;
+      shot.lastIdx = idx;
+      shot.dot.setPosition(shot.points[idx].x, shot.points[idx].y);
+
+      if (idx >= last) {
+        if (shot.trailMode === 'smoke' && shot.trail) {
+          // Отметка точки падения остается до следующего выстрела
+          shot.trail.fillStyle(0xffffff, 0.9);
+          shot.trail.fillCircle(shot.points[last].x, shot.points[last].y, 3);
+        }
+        if (!shot.keepDot) shot.dot.destroy();
+        this.activeShots.splice(i, 1);
+      }
+    }
   }
 
   /**
@@ -214,7 +273,10 @@ class GameScene extends Phaser.Scene {
     const { playerId, angle, power, wind, startX, startY, weaponId, special } = data;
 
     const tank = this.tanks[playerId];
-    if (tank) tank.setAngle(angle);
+    if (tank) {
+      tank.setAngle(angle);
+      tank.flash();
+    }
 
     if (this.players[playerId]) this.players[playerId].angle = angle;
 
@@ -233,32 +295,39 @@ class GameScene extends Phaser.Scene {
       window.sound.shot();
 
       const mainMs = special.stepMs || 30;
+      // Длительность основного полета — та же, что отсчитывает сервер
+      const mainPoints = Math.max(2, special.main.length / 2);
+      const serverMainMs = Number(data.flightMs);
+      const mainDoneMs = Number.isFinite(serverMainMs) && serverMainMs > 0
+        ? serverMainMs
+        : window.SharedPhysics.projectileFlightMs(mainPoints);
+      const flightStep = mainDoneMs / (mainPoints - 1);
+
+      // Спец-оружие тоже не должно взрываться раньше прилета
+      this.projectileImpactAt = this.time.now + mainDoneMs;
 
       if (special.type === 'mirv') {
-        const main = this.animatePolyline(special.main, 16.67, colorNum);
+        this.animatePolyline(special.main, flightStep, colorNum);
 
-        this.time.delayedCall((special.main.length / 2) * 16.67 + 50, () => {
+        this.time.delayedCall(mainDoneMs + 50, () => {
           // Распад: три боеголовки
           for (const w of special.warheads) {
             this.animatePolyline(w, mainMs, colorNum, 2);
           }
-          main?.destroy();
         });
       } else if (special.type === 'roller') {
-        this.animatePolyline(special.main, 16.67, colorNum);
-        const mainDoneMs = (special.main.length / 2) * 16.67 + 100;
+        this.animatePolyline(special.main, flightStep, colorNum);
 
-        this.time.delayedCall(mainDoneMs, () => {
+        this.time.delayedCall(mainDoneMs + 100, () => {
           this.waitForSpecialPath('path', (path) => {
             // Шар катится по склону
             this.animatePolyline(path, mainMs, colorNum, 4);
           });
         });
       } else if (special.type === 'napalm') {
-        this.animatePolyline(special.main, 16.67, colorNum);
-        const mainDoneMs = (special.main.length / 2) * 16.67 + 100;
+        this.animatePolyline(special.main, flightStep, colorNum);
 
-        this.time.delayedCall(mainDoneMs, () => {
+        this.time.delayedCall(mainDoneMs + 100, () => {
           this.waitForSpecialPath('flows', (flows) => {
             for (const flow of flows) {
               // Огненные точки стекают по склону
@@ -278,54 +347,44 @@ class GameScene extends Phaser.Scene {
 
     if (!trajectory || trajectory.length < 2) return;
 
-    const projectile = this.add.circle(trajectory[0].x, trajectory[0].y, 3, colorNum);
-
-    // Твин с массивом точек ненадежен в Phaser 3.60 — анимируем вручную:
-    // 1 точка траектории = 1 тик физики (16.67мс), снаряд точно следует кривой
-    // и останавливается в точке падения (не пролетает сквозь грунт).
     const isSmoke = weaponId === 'smoke_tracer';
 
     if (isSmoke) this.aimTrail = this.add.graphics();
 
     const trail = isSmoke ? this.aimTrail : this.add.graphics();
-    let idx = 0;
 
-    this.time.addEvent({
-      delay: 16.67,
-      repeat: trajectory.length,
-      callback: () => {
-        idx++;
-        if (idx < trajectory.length) {
-          projectile.setPosition(trajectory[idx].x, trajectory[idx].y);
-          if (!isSmoke) {
-            trail.fillStyle(0xffffff, 0.25);
-            trail.fillCircle(trajectory[idx].x, trajectory[idx].y, 1);
-          } else if (idx % 5 === 0) {
-            // Дымная дорожка остается до следующего выстрела — пристрелка
-            trail.fillStyle(0xcccccc, 0.85);
-            trail.fillCircle(trajectory[idx].x, trajectory[idx].y, 2);
-          }
-        } else {
-          // Точка падения
-          const last = trajectory[trajectory.length - 1];
-          projectile.setPosition(last.x, last.y);
-          if (isSmoke) {
-            trail.fillStyle(0xffffff, 0.9);
-            trail.fillCircle(last.x, last.y, 3);
-          }
-          projectile.destroy();
-        }
-      }
+    // Длительность берем из события сервера: он же по ней отсчитывает момент
+    // попадания. Локальная траектория может отличаться на точку-другую, если
+    // рельеф у клиента на обновление отстает — тогда взрыв разъезжался с полетом.
+    const steps = Math.max(1, trajectory.length - 1);
+    const serverMs = Number(data.flightMs);
+    const stepMs = Number.isFinite(serverMs) && serverMs > 0
+      ? serverMs / steps
+      : window.CONSTANTS.PHYSICS.projectileStepMs;
+
+    const shot = this.animatePoints(trajectory, stepMs, colorNum, 3, {
+      trail,
+      trailMode: isSmoke ? 'smoke' : 'thin'
     });
+
+    // Момент прилета: до него взрыв не показываем, даже если событие уже пришло
+    this.projectileImpactAt = shot ? shot.endsAt : this.time.now;
 
     if (isSmoke) {
       window.sound.smoke();
     } else {
       window.sound.shot();
+      window.sound.projectileFlight(this.projectileImpactAt - this.time.now);
     }
   }
 
   handleExplosion(data) {
+    const waitMs = Math.max(0, (this.projectileImpactAt || 0) - this.time.now);
+    if (waitMs > 0) {
+      this.time.delayedCall(waitMs, () => this.handleExplosion(data));
+      return;
+    }
+    this.projectileImpactAt = 0;
     const { x, y, radius, weaponId, damages } = data;
     const weapon = window.WEAPONS[weaponId] || {};
     const isDirt = weapon.effect === 'add_earth';
@@ -547,8 +606,11 @@ class GameScene extends Phaser.Scene {
         duration: 600,
         onComplete: () => boom.destroy()
       });
-      tank.destroy();
+
+      // Танк не исчезает, а остается обгоревшим остовом до конца раунда
+      tank.setAlive(false);
       delete this.tanks[data.playerId];
+      this.wrecks[data.playerId] = tank;
     }
     if (this.players[data.playerId]) this.players[data.playerId].isAlive = false;
     window.sound.explosion(50);
@@ -590,8 +652,15 @@ class GameScene extends Phaser.Scene {
   }
 
   clearObjects() {
+    (this.activeShots || []).forEach(shot => shot.dot.destroy());
+    this.activeShots = [];
+    this.projectileImpactAt = 0;
+
     Object.values(this.tanks).forEach(tank => tank.destroy());
     this.tanks = {};
+
+    Object.values(this.wrecks).forEach(wreck => wreck.destroy());
+    this.wrecks = {};
 
     if (this.terrain) {
       this.terrain.destroy();

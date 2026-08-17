@@ -233,11 +233,12 @@ class UIScene extends Phaser.Scene {
     this.playersList = document.getElementById('players-list');
     this.roundDisplay = document.getElementById('round-display');
     this.currentPlayerEl = document.getElementById('current-player');
-    this.windValue = document.getElementById('wind-value');
     this.timeValue = document.getElementById('time-value');
     this.timerEl = document.getElementById('timer');
     this.moneyValue = document.getElementById('money-value');
-    this.inventoryList = document.getElementById('inventory-list');
+    this.activeWeaponEl = document.getElementById('active-weapon');
+    this.inventoryModal = document.getElementById('inventory-modal');
+    this.inventoryGrid = document.getElementById('inventory-grid');
     this.btnOpenShop = document.getElementById('btn-open-shop');
     this.shopModal = document.getElementById('shop-modal');
     this.shopGrid = document.getElementById('shop-grid');
@@ -332,6 +333,10 @@ class UIScene extends Phaser.Scene {
     net.on('match_start', (d) => this.handleMatchStart(d));
     net.on('round_start', (d) => this.handleRoundStart(d));
     net.on('turn_start', (d) => this.handleTurnStart(d));
+    net.on('shot', () => {
+      this.firePending = false;
+      window.inputHandler?.unlockFire();
+    });
     net.on('turn_timeout', (d) => this.handleTurnTimeout(d));
     net.on('players_update', (d) => this.handlePlayersUpdate(d));
     net.on('player_disconnected', (d) => {
@@ -383,7 +388,19 @@ class UIScene extends Phaser.Scene {
     net.on('inter_round', (d) => this.handleInterRound(d));
     net.on('match_end', (d) => this.handleMatchEnd(d));
     net.on('match_reset', () => this.handleMatchReset());
-    net.on('error', (d) => this.showMessage(d.message));
+    net.on('error', (d) => {
+      if (this.firePending) {
+        this.firePending = false;
+        window.inputHandler?.unlockFire();
+
+        // Сервер отклонил выстрел — ход остался нашим, возвращаем управление
+        if (this.currentPlayerId === window.network.playerId) {
+          this.isMyTurn = true;
+          if (this.currentPlayerEl) this.currentPlayerEl.textContent = '► ВАШ ХОД ◄';
+        }
+      }
+      this.showMessage(d.message);
+    });
   }
 
   setupEventHandlers() {
@@ -448,7 +465,7 @@ class UIScene extends Phaser.Scene {
 
     document.getElementById('btn-leave-room').addEventListener('click', () => {
       window.network.leaveRoom();
-      location.reload();
+      this.showEntryScreen();
     });
 
     document.getElementById('btn-add-human').addEventListener('click', () => {
@@ -474,6 +491,19 @@ class UIScene extends Phaser.Scene {
       if (e.target === this.shopModal) this.closeShop();
     });
 
+    document.getElementById('btn-open-inventory')?.addEventListener('click', () => this.openInventory());
+    document.getElementById('btn-close-inventory')?.addEventListener('click', () => this.closeInventory());
+    this.inventoryModal?.addEventListener('click', (e) => {
+      if (e.target === this.inventoryModal) this.closeInventory();
+    });
+
+    document.getElementById('btn-leave-game')?.addEventListener('click', () => {
+      window.network.leaveRoom();
+      this.handleMatchReset();
+      this.showEntryScreen();
+      this.showMessage('Вы покинули матч');
+    });
+
     // Горячие клавиши (не срабатывают в полях ввода)
     document.addEventListener('keydown', (e) => {
       if (document.activeElement && document.activeElement.tagName === 'INPUT') {
@@ -490,8 +520,14 @@ class UIScene extends Phaser.Scene {
 
       if (e.code === 'KeyB') {
         this.shopModal?.classList.contains('visible') ? this.closeShop() : this.openShop();
+      } else if (e.code === 'KeyI') {
+        this.inventoryModal?.classList.contains('visible') ? this.closeInventory() : this.openInventory();
+      } else if (e.code === 'Tab') {
+        e.preventDefault();
+        this.cycleWeapon();
       } else if (e.code === 'Escape') {
         this.closeShop();
+        this.closeInventory();
         this.closeLeaderboard();
         this.closeRooms();
       }
@@ -499,11 +535,17 @@ class UIScene extends Phaser.Scene {
 
     // ==== Выстрел и вращение ствола ====
     window.inputHandler.setOnFireCallback((angle, power) => {
-      if (this.isMyTurn) {
+      const modalOpen = this.shopModal?.classList.contains('visible') || this.inventoryModal?.classList.contains('visible');
+      if (this.isMyTurn && !modalOpen && this.gameContainer.classList.contains('visible')) {
+        this.isMyTurn = false;
+        this.firePending = true;
+        if (this.currentPlayerEl) this.currentPlayerEl.textContent = 'ВЫСТРЕЛ...';
         window.network.fire(angle, power, this.getActiveWeapon());
+        return true;
       } else if (this.currentPlayerId) {
         this.showMessage('Сейчас не ваш ход');
       }
+      return false;
     });
 
     window.inputHandler.setOnAngleChangeCallback((angle) => {
@@ -947,7 +989,7 @@ class UIScene extends Phaser.Scene {
       this.players[p.id] = { ...this.players[p.id], ...p };
     });
 
-    if (this.windValue) this.windValue.textContent = (data.wind || 0).toFixed(1);
+    this.updateWindDisplay(data.wind || 0);
     this.updatePlayersList();
     this.updateInventoryDisplay();
     this.updateRoundDisplay();
@@ -959,6 +1001,10 @@ class UIScene extends Phaser.Scene {
     this.currentPlayerId = data.playerId;
     this.isMyTurn = data.playerId === window.network.playerId;
 
+    // Новый ход всегда снимает блокировку выстрела, чем бы ни кончился прошлый
+    this.firePending = false;
+    window.inputHandler?.unlockFire();
+
     const player = this.players[data.playerId];
     if (this.currentPlayerEl) {
       const label = player ? player.name : '...';
@@ -966,9 +1012,7 @@ class UIScene extends Phaser.Scene {
       this.currentPlayerEl.classList.toggle('my-turn', this.isMyTurn);
     }
 
-    if (data.wind !== undefined && this.windValue) {
-      this.windValue.textContent = data.wind.toFixed(1);
-    }
+    if (data.wind !== undefined) this.updateWindDisplay(data.wind);
 
     const ih = window.inputHandler;
     if (ih && this.isMyTurn && player) {
@@ -1263,7 +1307,7 @@ class UIScene extends Phaser.Scene {
   }
 
   updateInventoryDisplay() {
-    if (!this.inventoryList) return;
+    if (!this.inventoryGrid) return;
 
     const weapons = window.WEAPONS || {};
     const itemDefs = window.ITEMS || {};
@@ -1306,23 +1350,68 @@ class UIScene extends Phaser.Scene {
          </div>`
       : '';
 
-    this.inventoryList.innerHTML = shells + shieldLine + gear;
+    this.inventoryGrid.innerHTML = shells + shieldLine + gear;
 
-    this.inventoryList.querySelectorAll('.inventory-item[data-weapon]').forEach(item => {
+    this.inventoryGrid.querySelectorAll('.inventory-item[data-weapon]').forEach(item => {
       item.addEventListener('click', () => {
         if (item.classList.contains('out-of-stock')) return;
-        this.activeWeaponId = item.dataset.weapon;
-        window.network.selectWeapon(this.activeWeaponId);
-        this.updateInventoryDisplay();
+        this.selectWeapon(item.dataset.weapon);
       });
     });
 
-    this.inventoryList.querySelectorAll('.inventory-item[data-item]').forEach(item => {
+    this.inventoryGrid.querySelectorAll('.inventory-item[data-item]').forEach(item => {
       item.addEventListener('click', () => {
         if (!item.classList.contains('usable')) return;
         window.network.useItem(item.dataset.item);
       });
     });
+
+    this.updateActiveWeaponDisplay();
+  }
+
+  updateActiveWeaponDisplay() {
+    if (!this.activeWeaponEl) return;
+    const weaponId = this.getActiveWeapon();
+    const weapon = window.WEAPONS?.[weaponId];
+    if (!weapon) {
+      this.activeWeaponEl.textContent = 'Снаряд не выбран';
+      return;
+    }
+    const count = weapon.infinite ? '∞' : String(this.inventory[weaponId] || 0);
+    this.activeWeaponEl.innerHTML =
+      `<span>${escapeHtml(weapon.name)}</span><span class="active-count">×${count}</span>`;
+  }
+
+  selectWeapon(weaponId) {
+    const weapon = window.WEAPONS?.[weaponId];
+    const count = this.inventory[weaponId] || 0;
+    if (!weapon || (!weapon.infinite && count <= 0)) return;
+    this.activeWeaponId = weaponId;
+    window.network.selectWeapon(weaponId);
+    this.updateInventoryDisplay();
+  }
+
+  cycleWeapon() {
+    if (!this.gameContainer.classList.contains('visible') || window.network.isSpectator()) return;
+    const available = Object.entries(this.inventory)
+      .filter(([weaponId, count]) => count > 0 || window.WEAPONS?.[weaponId]?.infinite)
+      .map(([weaponId]) => weaponId);
+    if (available.length === 0) return;
+    const current = available.indexOf(this.getActiveWeapon());
+    const next = available[(current + 1) % available.length];
+    this.selectWeapon(next);
+    this.showMessage(`Выбрано: ${window.WEAPONS[next].name}`);
+  }
+
+  openInventory() {
+    if (!this.inventoryModal || window.network.isSpectator()) return;
+    this.inventoryModal.classList.add('visible');
+    this.updateInventoryDisplay();
+    window.sound?.click();
+  }
+
+  closeInventory() {
+    this.inventoryModal?.classList.remove('visible');
   }
 
   getActiveWeapon() {
@@ -1375,6 +1464,10 @@ class UIScene extends Phaser.Scene {
   updateMoneyDisplay() {
     if (this.moneyValue) this.moneyValue.textContent = this.money;
   }
+
+  // Ветер рисуется на игровом поле (GameScene.drawWindIndicator);
+  // в сайдбаре он только дублировал информацию и занимал место
+  updateWindDisplay() {}
 
   showMessage(text) {
     if (!this.messageText || !this.messagePanel) return;

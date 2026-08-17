@@ -86,6 +86,12 @@ class Sound {
     this.tone({ freq: 300, freqEnd: 80, duration: 0.2, type: 'triangle', gain: 0.3 });
   }
 
+  projectileFlight(durationMs) {
+    const duration = Math.max(0.12, Math.min((durationMs || 0) / 1000, 1.5));
+    this.noise({ duration, filterType: 'bandpass', freq: 1800, freqEnd: 700, gain: 0.06 });
+    this.tone({ freq: 1100, freqEnd: 650, duration, type: 'triangle', gain: 0.045 });
+  }
+
   smoke() {
     this.noise({ duration: 0.35, filterType: 'highpass', freq: 3000, freqEnd: 6000, gain: 0.25 });
   }
