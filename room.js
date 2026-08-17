@@ -3,8 +3,10 @@
  * Сервер держит десятки комнат; события рассылаются в io.to(roomId).
  */
 
+const crypto = require('crypto');
+
 const {
-  MAP_WIDTH, PHYSICS, GAME, ROOM, PALETTE
+  MAP_WIDTH, PHYSICS, GAME, ECONOMY, ROOM, PALETTE
 } = require('./shared/constants');
 const { getWeapon, BASE_WEAPON_ID } = require('./shared/weapons');
 const {
@@ -51,6 +53,7 @@ class Room {
     this.tanks = [];
     this.wind = 0;
     this.turnPhase = 'idle';           // aiming | resolving | idle
+    this.lastShooterId = null;         // автор текущего выстрела (для урона от падений)
     this.currentPlayerIndex = 0;
     this.turnStartTime = 0;
     this.timers = { turn: null, resolve: null, round: null, match: null, bot: null };
@@ -115,6 +118,7 @@ class Room {
       name: p.name,
       colorIdx: p.colorIdx,
       isBot: !!p.isBot,
+      isGuest: !!p.isGuest,
       difficulty: p.difficulty || null,
       hp: p.hp,
       money: p.money,
@@ -148,12 +152,26 @@ class Room {
     return this.playerOrderIds().filter(pid => this.players[pid].isAlive);
   }
 
-  createHuman(name, colorIdx, userId) {
+  /**
+   * Участник-человек. Имя авторизованного игрока берется из аккаунта:
+   * подделать чужой позывной в лобби нельзя. Гость играет под введенным
+   * именем и помечается как гость.
+   */
+  createHuman(socket, name, colorIdx) {
+    const account = socket.userId ? { id: socket.userId, username: socket.username } : null;
+    const displayName = account
+      ? account.username
+      : (String(name || '').trim().slice(0, 20) || 'Игрок');
+
     return {
-      id: 'p' + Math.random().toString(36).substr(2, 9),
-      name: String(name).slice(0, 20),
+      id: 'p' + crypto.randomUUID(),
+      // playerId виден всем в room_state, поэтому возврат в бой подтверждается
+      // отдельным секретом, который знает только владелец места
+      sessionSecret: crypto.randomBytes(24).toString('hex'),
+      name: displayName,
       colorIdx,
-      userId: userId || null,          // привязка к аккаунту (если авторизован)
+      userId: account ? account.id : null,
+      isGuest: !account,
       isBot: false,
       socketId: null,
       hp: 100,
@@ -201,7 +219,7 @@ class Room {
    */
   initializeHost(hostSocket, hostName, colorIdx) {
     const color = colorIdx !== undefined && !this.colorTaken(colorIdx) ? colorIdx : this.freeColorIdx();
-    const host = this.createHuman(hostName || 'Хост', color, hostSocket.userId);
+    const host = this.createHuman(hostSocket, hostName || 'Хост', color);
     host.socketId = hostSocket.id;
     this.players[host.id] = host;
     this.hostId = host.id;
@@ -214,7 +232,7 @@ class Room {
     this.lastHumanActivity = Date.now();
 
     this.emitRoomState();
-    return { playerId: host.id };
+    return { playerId: host.id, sessionSecret: host.sessionSecret };
   }
 
   /**
@@ -270,7 +288,7 @@ class Room {
     if (color === null) color = this.freeColorIdx();
     slot.colorIdx = color;
 
-    const player = this.createHuman(name, color, socket.userId);
+    const player = this.createHuman(socket, name, color);
     player.socketId = socket.id;
     this.players[player.id] = player;
     slot.playerId = player.id;
@@ -283,6 +301,7 @@ class Room {
     socket.emit('joined_room', {
       roomId: this.id,
       playerId: player.id,
+      sessionSecret: player.sessionSecret,
       colorIdx: color,
       room: this.roomState()
     });
@@ -298,11 +317,20 @@ class Room {
   }
 
   /**
-   * Реконнект участника по playerId.
+   * Реконнект участника. Одного playerId мало: он виден всем в room_state,
+   * поэтому нужен либо секрет сессии, либо тот же аккаунт (заход с другого
+   * устройства под своим логином).
    */
-  rebind(socket, playerId) {
+  rebind(socket, playerId, secret) {
     const p = this.players[playerId];
-    if (!p) return false;
+    if (!p || p.isBot) return false;
+
+    const bySecret = !!p.sessionSecret && typeof secret === 'string' &&
+      secret.length === p.sessionSecret.length &&
+      crypto.timingSafeEqual(Buffer.from(secret), Buffer.from(p.sessionSecret));
+    const byAccount = !!socket.userId && !!p.userId && socket.userId === p.userId;
+
+    if (!bySecret && !byAccount) return false;
 
     // Перехват управления, если зашли с нового сокета
     if (p.socketId && p.socketId !== socket.id) {
@@ -330,6 +358,7 @@ class Room {
       ok: true,
       roomId: this.id,
       playerId,
+      sessionSecret: p.sessionSecret,
       room: this.roomState(),
       snapshot: this.gameSnapshot(),
       inventory: p.inventory,
@@ -437,9 +466,11 @@ class Room {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
-    Object.values(this.timers).forEach(t => t && clearTimeout(t));
+    this.clearTimers();
     Object.values(this.players).forEach(p => p.disconnectTimer && clearTimeout(p.disconnectTimer));
-    this.io.in(this.id).disconnect(true);
+    // socket.io 4.x: у BroadcastOperator метод называется disconnectSockets,
+    // прежний disconnect() бросал TypeError при каждом закрытии комнаты
+    this.io.in(this.id).disconnectSockets(true);
   }
 
   // ============================================
@@ -713,6 +744,7 @@ class Room {
     this.clearTimer('resolve');
     this.clearTimer('bot');
     this.turnPhase = 'idle';
+    this.lastShooterId = null;
 
     const order = this.playerOrderIds();
     this.currentPlayerIndex = (this.currentPlayerIndex + 1) % order.length;
@@ -723,6 +755,7 @@ class Room {
   endRound(winnerId) {
     this.phase = 'interRound';
     this.turnPhase = 'idle';
+    this.lastShooterId = null;
     this.clearTimers();
 
     if (winnerId && this.players[winnerId]) {
@@ -832,17 +865,25 @@ class Room {
       const tank = this.tanks.find(t => t.playerId === playerId);
       if (!tank) return;
 
-      // Экономика бота: покупка перед выстрелом
-      const shot = decideShot({
-        difficulty: bot.difficulty,
-        heights: this.terrain,
-        wind: this.wind,
-        selfTank: tank,
-        selfHp: bot.hp,
-        enemyTanks: this.tanks.filter(t => t.playerId !== playerId),
-        money: bot.money,
-        inventory: bot.inventory
-      });
+      // Сбой ИИ не должен ронять комнату: бот пропускает ход
+      let shot;
+      try {
+        // Экономика бота: покупка перед выстрелом
+        shot = decideShot({
+          difficulty: bot.difficulty,
+          heights: this.terrain,
+          wind: this.wind,
+          selfTank: tank,
+          selfHp: bot.hp,
+          enemyTanks: this.tanks.filter(t => t.playerId !== playerId),
+          money: bot.money,
+          inventory: bot.inventory
+        });
+      } catch (e) {
+        console.error(`Комната ${this.id}: ошибка ИИ (${bot.name}):`, e);
+        this.endTurn();
+        return;
+      }
 
       const weapon = getWeapon(shot.weaponId);
       if (weapon && !weapon.infinite && !(bot.inventory[shot.weaponId] > 0) && bot.money >= weapon.price) {
@@ -880,16 +921,24 @@ class Room {
     const p = this.players[playerId];
     if (!p || !p.isAlive || damage <= 0) return false;
 
+    const hpBefore = p.hp;
     p.hp = Math.max(0, p.hp - damage);
+    const dealt = hpBefore - p.hp;   // фактически снятые HP (не «перебор» по мертвому танку)
 
     this.emit('hp_update', { playerId, hp: p.hp, damage: Math.round(damage), cause: cause || 'explosion' });
+
+    // Деньги за урон — только за чужие танки, самоподрыв не оплачивается
+    const byOther = sourcePlayerId && sourcePlayerId !== playerId && this.players[sourcePlayerId];
+    if (byOther && dealt > 0) {
+      this.addMoney(sourcePlayerId, dealt * ECONOMY.perDamageHp, 'damage');
+    }
 
     if (p.hp <= 0) {
       p.isAlive = false;
 
-      if (sourcePlayerId && sourcePlayerId !== playerId && this.players[sourcePlayerId]) {
+      if (byOther) {
         this.players[sourcePlayerId].kills++;
-        this.addMoney(sourcePlayerId, 100, 'kill');
+        this.addMoney(sourcePlayerId, ECONOMY.perKill, 'kill');
       }
 
       const tankIndex = this.tanks.findIndex(t => t.playerId === playerId);
@@ -925,6 +974,9 @@ class Room {
 
     p.angle = angle;
     p.power = power;
+
+    // Автор текущего выстрела: ему засчитываются падения, вызванные его взрывом
+    this.lastShooterId = playerId;
 
     const startX = tank.x;
     const startY = tank.y - PHYSICS.tankHeight;
@@ -1052,7 +1104,7 @@ class Room {
           terrainDiff = -applyDirtBall(this.terrain, ix, iy, weapon.radius);
         } else if (weapon.effect !== 'smoke') {
           terrainDiff = applyExplosion(this.terrain, ix, iy, weapon.radius);
-          this.addMoney(playerId, terrainDiff, 'terrain');
+          this.addMoney(playerId, terrainDiff * ECONOMY.perTerrainPixel, 'terrain');
         }
 
         this.emit('explosion', {
@@ -1133,7 +1185,8 @@ class Room {
           const fallDamage = calculateFallDamage(res.fallDistance);
           if (fallDamage > 0) {
             this.emit('fall_damage', { playerId: tank.playerId, distance: Math.round(res.fallDistance), damage: fallDamage });
-            this.damagePlayer(tank.playerId, fallDamage, null, 'fall');
+            // Сброс врага в пропасть — такое же попадание: фраг и деньги стрелявшему
+            this.damagePlayer(tank.playerId, fallDamage, this.lastShooterId || null, 'fall');
           }
         }
       }
@@ -1212,6 +1265,7 @@ class Room {
       round: this.round,
       maxRounds: this.config.rounds,
       players: this.playersSnapshot(),
+      terrainSeed: this.terrainSeed,   // тема неба выводится из seed: зритель увидит то же, что все
       heights: this.terrain,
       tanks: this.tanks,
       wind: this.wind,

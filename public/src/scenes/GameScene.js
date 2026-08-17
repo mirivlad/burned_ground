@@ -138,13 +138,15 @@ class GameScene extends Phaser.Scene {
   }
 
   handleGameSnapshot(snapshot) {
-    if (!snapshot || snapshot.status !== 'playing') return;
+    // Зритель может зайти и в паузе между раундами — поле уже есть, показываем его
+    if (!snapshot || (snapshot.status !== 'playing' && snapshot.status !== 'interRound')) return;
 
     this.wind = snapshot.wind || 0;
     this.round = snapshot.round || 0;
+    this.lastSeed = snapshot.terrainSeed || this.lastSeed || 1;
 
     this.buildWorld({
-      terrainSeed: this.lastSeed || 1,
+      terrainSeed: this.lastSeed,
       heights: snapshot.heights,
       tanks: snapshot.tanks,
       players: snapshot.players

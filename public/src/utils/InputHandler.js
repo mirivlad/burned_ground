@@ -28,15 +28,16 @@ class InputHandler {
       }
 
       switch(e.code) {
+        // 0° = влево, 180° = вправо: стрелка ведет ствол в свою сторону
         case 'ArrowLeft':
-          this.angle = Math.min(180, this.angle + 1);
+          this.angle = Math.max(0, this.angle - 1);
           this.updateAngleDisplay();
           if (this.onAngleChangeCallback) {
             this.onAngleChangeCallback(this.angle);
           }
           break;
         case 'ArrowRight':
-          this.angle = Math.max(0, this.angle - 1);
+          this.angle = Math.min(180, this.angle + 1);
           this.updateAngleDisplay();
           if (this.onAngleChangeCallback) {
             this.onAngleChangeCallback(this.angle);

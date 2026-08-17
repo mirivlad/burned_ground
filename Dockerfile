@@ -22,6 +22,10 @@ COPY public ./public
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV BG_DATA_DIR=/app/data
+
+# Каталог под SQLite создаем ДО объявления тома и отдаем пользователю node:
+# иначе Docker создаст точку монтирования от root и процесс упадет с EACCES
+RUN mkdir -p /app/data && chown -R node:node /app/data
 VOLUME /app/data
 EXPOSE 3000
 

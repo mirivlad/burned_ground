@@ -30,7 +30,7 @@ function solveShot(heights, wind, from, target) {
   for (let a = 5; a <= 175; a += 2) {
     for (let p = 15; p <= 100; p += 3) {
       const r = sim(a, p);
-      if (!best || r.dist < best.dist) best = { angle: a, power: p, ...r };
+      if (!best || r.dist < best.dist) best = { angle: a, power: p, dist: r.dist, impact: r.imp };
     }
   }
 
@@ -41,7 +41,7 @@ function solveShot(heights, wind, from, target) {
     for (let p = p0 - 3; p <= p0 + 3; p += 1) {
       if (p < 5 || p > 100) continue;
       const r = sim(a, p);
-      if (r.dist < best.dist) best = { angle: a, power: p, ...r };
+      if (r.dist < best.dist) best = { angle: a, power: p, dist: r.dist, impact: r.imp };
     }
   }
 

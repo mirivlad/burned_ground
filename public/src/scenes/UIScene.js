@@ -57,9 +57,12 @@ class UIScene extends Phaser.Scene {
     document.getElementById('btn-login')?.classList.add('hidden');
     document.getElementById('btn-register')?.classList.add('hidden');
 
-    // Позывной по умолчанию = имя аккаунта
-    if (this.entryName && !this.entryName.value) {
+    // Авторизованный играет под именем аккаунта — сервер все равно
+    // подставит его, поэтому поле фиксируем, чтобы не вводить в заблуждение
+    if (this.entryName) {
       this.entryName.value = user.username;
+      this.entryName.disabled = true;
+      this.entryName.title = 'Позывной берется из аккаунта';
     }
   }
 
@@ -68,6 +71,11 @@ class UIScene extends Phaser.Scene {
     this.btnLogout?.classList.add('hidden');
     document.getElementById('btn-login')?.classList.remove('hidden');
     document.getElementById('btn-register')?.classList.remove('hidden');
+
+    if (this.entryName) {
+      this.entryName.disabled = false;
+      this.entryName.title = '';
+    }
   }
 
   setupAccountHandlers() {
@@ -101,8 +109,8 @@ class UIScene extends Phaser.Scene {
       if (e.key === 'Enter') this.authPassword?.focus();
     });
 
-    this.btnLogout?.addEventListener('click', () => {
-      window.network.setAuth(null, null);
+    this.btnLogout?.addEventListener('click', async () => {
+      await window.network.logout();
       this.hideProfile();
       this.showMessage('Вы вышли из аккаунта');
     });
@@ -194,7 +202,7 @@ class UIScene extends Phaser.Scene {
         this.showGameScreen();
         if (d.room) this.applyRoomState(d.room);
         const snap = d.snapshot;
-        if (snap && snap.status === 'playing') {
+        if (snap && (snap.status === 'playing' || snap.status === 'interRound')) {
           this.restoreGameFromSnapshot(snap);
         }
         if (d.inventory) {
@@ -210,7 +218,7 @@ class UIScene extends Phaser.Scene {
 
     net.on('game_snapshot', (snap) => {
       this.showGameScreen();
-      if (snap && snap.status === 'playing') {
+      if (snap && (snap.status === 'playing' || snap.status === 'interRound')) {
         this.restoreGameFromSnapshot(snap);
       }
     });
@@ -249,9 +257,13 @@ class UIScene extends Phaser.Scene {
     this.setupAccountHandlers();
 
     // ==== Вход ====
+    // Позывной запоминается: showEntryScreen подставит его при следующем заходе
+    const rememberName = (name) => localStorage.setItem('bg_name', name);
+
     document.getElementById('btn-create').addEventListener('click', () => {
       const name = this.entryName.value.trim();
       if (!name) { this.entryName.focus(); return; }
+      rememberName(name);
       window.network.createRoom(name, this.selectedColorIdx);
     });
 
@@ -259,6 +271,7 @@ class UIScene extends Phaser.Scene {
       const name = this.entryName.value.trim();
       const code = this.entryCode.value.trim().toUpperCase();
       if (!name || !code) return;
+      rememberName(name);
       window.network.joinRoom(code, name, this.selectedColorIdx, false);
     });
 
@@ -266,6 +279,7 @@ class UIScene extends Phaser.Scene {
       const name = this.entryName.value.trim();
       const code = this.entryCode.value.trim().toUpperCase();
       if (!name || !code) return;
+      rememberName(name);
       window.network.joinRoom(code, name, this.selectedColorIdx, true);
     });
 
@@ -459,7 +473,7 @@ class UIScene extends Phaser.Scene {
             <span class="slot-name">${escapeHtml(slot.player.name)}${hostTag}</span>
             ${diff}
           </div>
-          <div class="slot-kind">${slot.player.isBot ? 'БОТ' : 'ИГРОК'}${slot.player.connected === false ? ' · ОФФЛАЙН' : ''}</div>
+          <div class="slot-kind">${slot.player.isBot ? 'БОТ' : (slot.player.isGuest ? 'ГОСТЬ' : 'ИГРОК')}${slot.player.connected === false ? ' · ОФФЛАЙН' : ''}</div>
         `;
       } else if (slot.kind === 'human') {
         inner = `
@@ -691,7 +705,7 @@ class UIScene extends Phaser.Scene {
     if (p) {
       this.showMessage(
         data.cause === 'fall'
-          ? `${p.name} разбился при падении!`
+          ? `${p.name} разбился при падении!${killer ? ' Сбросил: ' + killer.name : ''}`
           : `${p.name} уничтожен${killer ? ' (' + killer.name + ')' : ''}`
       );
     }
@@ -929,11 +943,13 @@ class UIScene extends Phaser.Scene {
       const isBot = p.isBot ? 'bot-item' : '';
       const isMe = p.id === myId ? ' (вы)' : '';
       const color = window.CONSTANTS.PALETTE[p.colorIdx]?.css || '#ffffff';
+      // Гость не влияет на рейтинг — помечаем явно
+      const guestTag = p.isGuest && !p.isBot ? '<span class="p-guest" title="Играет без аккаунта">гость</span>' : '';
 
       return `
         <div class="player-item ${isCurrent} ${isAlive} ${offline} ${isBot}">
           <div class="p-color" style="background:${color}"></div>
-          <span class="p-name">${escapeHtml(p.name || 'Игрок')}${isMe}</span>
+          <span class="p-name">${escapeHtml(p.name || 'Игрок')}${isMe}${guestTag}</span>
           <span class="player-hp">${p.hp}</span>
           <span class="player-money">$${p.money}</span>
         </div>

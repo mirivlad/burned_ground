@@ -44,6 +44,13 @@
     reconnectWindowMs: 120000        // 2 минуты на перезаход после обрыва связи
   };
 
+  // Экономика: за что и сколько платят (единый источник для сервера и README)
+  const ECONOMY = {
+    perTerrainPixel: 1,              // $ за пиксель уничтоженного грунта
+    perDamageHp: 5,                  // $ за единицу нанесенного урона
+    perKill: 100                     // $ за уничтоженный танк
+  };
+
   const ROOM = {
     maxSlots: 10,                    // максимум слотов в комнате
     codeLength: 5,
@@ -91,6 +98,7 @@
     GROUND_MAX_Y,
     PHYSICS,
     GAME,
+    ECONOMY,
     ROOM,
     PALETTE,
     BOT,

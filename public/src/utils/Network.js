@@ -10,6 +10,7 @@ class Network {
     this.socket = null;
     this.playerId = null;
     this.roomId = null;
+    this.sessionSecret = null;   // подтверждает право вернуться на свое место
     this.playerName = null;
     this.authToken = localStorage.getItem('bg_token') || null;
     this.account = null;        // { id, username } если авторизован
@@ -27,12 +28,16 @@ class Network {
   saveSession() {
     if (this.roomId && this.playerId) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        roomId: this.roomId, playerId: this.playerId, name: this.playerName
+        roomId: this.roomId,
+        playerId: this.playerId,
+        sessionSecret: this.sessionSecret,
+        name: this.playerName
       }));
     }
   }
 
   clearSession() {
+    this.sessionSecret = null;
     localStorage.removeItem(STORAGE_KEY);
   }
 
@@ -46,7 +51,12 @@ class Network {
       const saved = this.restoreSession();
       if (saved && saved.roomId && saved.playerId) {
         this.playerName = saved.name;
-        this.socket.emit('rejoin', { roomId: saved.roomId, playerId: saved.playerId });
+        this.sessionSecret = saved.sessionSecret || null;
+        this.socket.emit('rejoin', {
+          roomId: saved.roomId,
+          playerId: saved.playerId,
+          sessionSecret: this.sessionSecret
+        });
       } else {
         this.emit('need_join', {});
       }
@@ -63,6 +73,7 @@ class Network {
     this.socket.on('room_created', (d) => {
       this.roomId = d.roomId;
       this.playerId = d.playerId;
+      if (d.sessionSecret) this.sessionSecret = d.sessionSecret;
       this.saveSession();
       this.lastRoomState = d.room;
       this.emit('room_created', d);
@@ -77,6 +88,7 @@ class Network {
     this.socket.on('joined_room', (d) => {
       if (d.playerId) {
         this.playerId = d.playerId;
+        if (d.sessionSecret) this.sessionSecret = d.sessionSecret;
         this.saveSession();
       }
       if (d.room) this.lastRoomState = d.room;
@@ -92,6 +104,7 @@ class Network {
       if (d.ok) {
         this.roomId = d.roomId;
         this.playerId = d.playerId;
+        if (d.sessionSecret) this.sessionSecret = d.sessionSecret;
         this.saveSession();
       } else {
         this.clearSession();
@@ -159,6 +172,18 @@ class Network {
       this.setAuth(null, null);
       return null;
     }
+  }
+
+  async logout() {
+    // Токен отзывается на сервере, иначе он остается валидным до истечения срока
+    if (this.authToken) {
+      try {
+        await this.api('/api/auth/logout', { method: 'POST' });
+      } catch {
+        // Сервер недоступен — локальную сессию все равно чистим
+      }
+    }
+    this.setAuth(null, null);
   }
 
   setAuth(token, user) {

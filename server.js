@@ -24,6 +24,10 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+// За реверс-прокси (Nginx) включите BG_TRUST_PROXY=1, иначе все клиенты
+// придут с адресом прокси и лимит попыток входа станет общим на всех
+app.set('trust proxy', process.env.BG_TRUST_PROXY === '1');
+
 app.use(express.json({ limit: '100kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/shared', express.static(path.join(__dirname, 'shared')));
@@ -37,16 +41,72 @@ function tokenFromReq(req) {
   return header.startsWith('Bearer ') ? header.slice(7) : null;
 }
 
+/**
+ * Лимит попыток на вход/регистрацию: скользящее окно в памяти процесса.
+ * Ключ — IP + логин, чтобы перебор одного аккаунта с разных адресов
+ * и перебор разных аккаунтов с одного адреса ловились одинаково.
+ */
+const RATE = { windowMs: 15 * 60 * 1000, maxAttempts: 10 };
+const attempts = new Map();   // key -> { count, resetAt }
+
+function rateLimit(req, res, action) {
+  const key = `${action}:${req.ip}:${String(req.body?.username || '').toLowerCase()}`;
+  const now = Date.now();
+  const entry = attempts.get(key);
+
+  if (!entry || now > entry.resetAt) {
+    attempts.set(key, { count: 1, resetAt: now + RATE.windowMs });
+    return false;
+  }
+
+  entry.count++;
+  if (entry.count > RATE.maxAttempts) {
+    const waitMin = Math.ceil((entry.resetAt - now) / 60000);
+    res.status(429).json({ error: `Слишком много попыток. Повторите через ${waitMin} мин.` });
+    return true;
+  }
+  return false;
+}
+
+// Успешный вход снимает счетчик, чтобы не наказывать за опечатки
+function rateLimitReset(req, action) {
+  attempts.delete(`${action}:${req.ip}:${String(req.body?.username || '').toLowerCase()}`);
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of attempts) {
+    if (now > entry.resetAt) attempts.delete(key);
+  }
+}, 10 * 60 * 1000).unref();
+
+// Протухшие токены чистятся раз в сутки
+setInterval(() => auth.purgeExpiredTokens(), 24 * 60 * 60 * 1000).unref();
+
 app.post('/api/auth/register', (req, res) => {
+  if (rateLimit(req, res, 'register')) return;
+
   const result = auth.registerUser(req.body?.username, req.body?.password);
   if (result.error) return res.status(400).json({ error: result.error });
+
+  rateLimitReset(req, 'register');
   res.json({ token: result.token, user: result.user });
 });
 
 app.post('/api/auth/login', (req, res) => {
+  if (rateLimit(req, res, 'login')) return;
+
   const result = auth.loginUser(req.body?.username, req.body?.password);
   if (result.error) return res.status(401).json({ error: result.error });
+
+  rateLimitReset(req, 'login');
   res.json({ token: result.token, user: result.user });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  // Токен отзывается на сервере: очистки localStorage недостаточно
+  auth.revokeToken(tokenFromReq(req));
+  res.json({ ok: true });
 });
 
 app.get('/api/me', (req, res) => {
@@ -88,11 +148,6 @@ function createRoom({ hostSocket, hostName, hostColorIdx }) {
   });
   rooms.set(id, room);
   room.initializeHost(hostSocket, hostName, hostColorIdx);
-  hostSocket.emit('room_created', {
-    roomId: room.id,
-    playerId: hostSocket.playerId,
-    room: room.roomState()
-  });
   scheduleSweep();
   return room;
 }
@@ -141,6 +196,7 @@ io.on('connection', (socket) => {
   // Аккаунт по токену из handshake (io({ auth: { token } }) на клиенте)
   const account = auth.userByToken(socket.handshake?.auth?.token);
   socket.userId = account ? account.id : null;
+  socket.username = account ? account.username : null;
 
   socket.on('create_room', ({ playerName, colorIdx } = {}) => {
     if (socket.roomId && getRoom(socket.roomId)) {
@@ -149,12 +205,15 @@ io.on('connection', (socket) => {
     }
 
     const room = createRoom({ hostSocket: socket, hostName: playerName, hostColorIdx: colorIdx });
+    const host = room.players[socket.playerId];
+
     socket.emit('room_created', {
       roomId: room.id,
       playerId: socket.playerId,
+      sessionSecret: host ? host.sessionSecret : null,
       room: room.roomState()
     });
-    console.log(`Комната создана: ${room.id} (хост: ${playerName})`);
+    console.log(`Комната создана: ${room.id} (хост: ${host ? host.name : playerName})`);
   });
 
   socket.on('join_room', ({ roomId, playerName, colorIdx, asSpectator } = {}) => {
@@ -173,13 +232,19 @@ io.on('connection', (socket) => {
     console.log(`Комната ${room.id}: вход ${playerName}${asSpectator ? ' (зритель)' : ''}`);
   });
 
-  socket.on('rejoin', ({ roomId, playerId } = {}) => {
+  socket.on('rejoin', ({ roomId, playerId, sessionSecret } = {}) => {
     const room = getRoom(roomId);
     if (!room || !room.players[playerId]) {
       socket.emit('rejoin_result', { ok: false, reason: 'not_found' });
       return;
     }
-    room.rebind(socket, playerId);
+
+    if (!room.rebind(socket, playerId, sessionSecret)) {
+      socket.emit('rejoin_result', { ok: false, reason: 'forbidden' });
+      console.warn(`Комната ${room.id}: отклонен реконнект на ${playerId} (сокет ${socket.id})`);
+      return;
+    }
+
     console.log(`Комната ${room.id}: реконнект ${room.players[playerId].name}`);
   });
 
@@ -191,6 +256,11 @@ io.on('connection', (socket) => {
 
   socket.on('claim_slot', inRoom((room, d) => room.claimSlot(socket, d || {})));
   socket.on('leave_room', inRoom((room) => {
+    // Участника удаляем сразу: слот освобождается, комната может быть подметена.
+    // Без этого игрок остается в room.players с connected=true навсегда.
+    if (socket.playerId) room.removeParticipant(socket.playerId);
+    else delete room.spectators[socket.id];
+
     socket.leave(room.id);
     socket.roomId = null;
     socket.playerId = null;
@@ -244,6 +314,15 @@ app.get('/api/rooms', (req, res) => {
       spectators: Object.keys(r.spectators).length
     }))
   });
+});
+
+// Одна упавшая комната не должна уносить сервер вместе со всеми матчами:
+// таймеры (ходы ботов, отложенные попадания) исполняются вне try/catch вызывающего.
+process.on('uncaughtException', (err) => {
+  console.error('Необработанное исключение:', err);
+});
+process.on('unhandledRejection', (err) => {
+  console.error('Необработанный reject:', err);
 });
 
 const PORT = process.env.PORT || 3000;

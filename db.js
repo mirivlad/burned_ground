@@ -27,7 +27,8 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS tokens (
     token TEXT PRIMARY KEY,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL DEFAULT ''
   );
 
   CREATE TABLE IF NOT EXISTS matches (
@@ -53,9 +54,20 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_part_user ON match_participants(user_id);
 `);
 
+// Миграция баз, созданных до появления срока жизни токенов
+{
+  const cols = db.prepare('PRAGMA table_info(tokens)').all();
+  if (!cols.some(c => c.name === 'expires_at')) {
+    db.exec(`ALTER TABLE tokens ADD COLUMN expires_at TEXT NOT NULL DEFAULT ''`);
+  }
+}
+
 // ============================================
 // ПАРОЛИ И ТОКЕНЫ
 // ============================================
+
+const TOKEN_TTL_DAYS = 30;
+const MIN_PASSWORD_LENGTH = 6;
 
 function hashPassword(password, salt) {
   return crypto.scryptSync(password, salt, 64).toString('hex');
@@ -69,9 +81,31 @@ function verifyPassword(password, salt, expectedHash) {
 
 function issueToken(userId) {
   const token = crypto.randomBytes(32).toString('hex');
-  db.prepare('INSERT INTO tokens (token, user_id) VALUES (?, ?)').run(token, userId);
+  db.prepare(`
+    INSERT INTO tokens (token, user_id, expires_at)
+    VALUES (?, ?, datetime('now', ?))
+  `).run(token, userId, `+${TOKEN_TTL_DAYS} days`);
   return token;
 }
+
+function revokeToken(token) {
+  if (!token) return false;
+  return db.prepare('DELETE FROM tokens WHERE token = ?').run(String(token)).changes > 0;
+}
+
+/**
+ * Чистка протухших токенов. Строки со старым пустым expires_at (миграция)
+ * получают срок от даты выдачи.
+ */
+function purgeExpiredTokens() {
+  db.prepare(`
+    UPDATE tokens SET expires_at = datetime(created_at, ?) WHERE expires_at = ''
+  `).run(`+${TOKEN_TTL_DAYS} days`);
+
+  return db.prepare(`DELETE FROM tokens WHERE expires_at <= datetime('now')`).run().changes;
+}
+
+purgeExpiredTokens();
 
 // ============================================
 // ПОЛЬЗОВАТЕЛИ
@@ -87,8 +121,8 @@ function registerUser(username, password) {
   if (!/^[A-Za-zА-Яа-яЁё0-9_-]+$/.test(name)) {
     return { error: 'Имя: только буквы, цифры, _ и -' };
   }
-  if (pass.length < 4) {
-    return { error: 'Пароль: минимум 4 символа' };
+  if (pass.length < MIN_PASSWORD_LENGTH) {
+    return { error: `Пароль: минимум ${MIN_PASSWORD_LENGTH} символов` };
   }
 
   const exists = db.prepare('SELECT id FROM users WHERE username = ?').get(name);
@@ -110,7 +144,14 @@ function loginUser(username, password) {
   const name = String(username || '').trim();
   const row = db.prepare('SELECT * FROM users WHERE username = ?').get(name);
 
-  if (!row || !verifyPassword(String(password || ''), row.salt, row.password_hash)) {
+  if (!row) {
+    // Считаем хеш и для несуществующего логина: иначе время ответа
+    // выдает, какие имена зарегистрированы
+    hashPassword(String(password || ''), 'timing-equalizer');
+    return { error: 'Неверное имя или пароль' };
+  }
+
+  if (!verifyPassword(String(password || ''), row.salt, row.password_hash)) {
     return { error: 'Неверное имя или пароль' };
   }
 
@@ -122,7 +163,7 @@ function userByToken(token) {
   const row = db.prepare(`
     SELECT u.id, u.username FROM tokens t
     JOIN users u ON u.id = t.user_id
-    WHERE t.token = ?
+    WHERE t.token = ? AND (t.expires_at = '' OR t.expires_at > datetime('now'))
   `).get(String(token));
   return row || null;
 }
@@ -195,6 +236,8 @@ module.exports = {
   registerUser,
   loginUser,
   userByToken,
+  revokeToken,
+  purgeExpiredTokens,
   recordMatch,
   userStats,
   userStatsByName

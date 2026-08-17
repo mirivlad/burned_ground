@@ -213,6 +213,7 @@ h2 {
 .player-item.offline .p-name::after { content: ' [offline]'; color: #ff5555; font-size: 10px; }
 .player-item.current { background-color: rgba(255,210,74,0.12); border-left-color: #ffd24a; }
 .player-item.bot-item .p-name::after { content: ' [бот]'; color: #ff77ff; font-size: 10px; }
+.p-guest { color: #888; font-size: 10px; margin-left: 4px; }
 
 .player-hp { color: #ff6666; font-size: 11px; }
 .player-money { color: #ffd700; font-size: 11px; }
