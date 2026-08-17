@@ -156,6 +156,91 @@ input[type="text"]::placeholder { color: #3a5a42; text-transform: uppercase; }
 
 #leaderboard-hint { margin-top: 12px; font-size: 10px; color: #3a5a42; letter-spacing: 1px; }
 
+/* Список открытых комнат */
+#rooms-modal {
+  position: fixed; inset: 0; z-index: 6500;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+}
+#rooms-modal.visible { display: flex; }
+
+#rooms-box {
+  width: 720px; max-width: 94vw; max-height: 90vh;
+  display: flex; flex-direction: column;
+  border: 2px double #33ff66;
+  box-shadow: 0 0 40px rgba(51, 255, 102, 0.25);
+  background: #050a06; padding: 18px 24px; color: #9dffb0;
+}
+
+#rooms-header {
+  display: flex; align-items: center; gap: 14px;
+  border-bottom: 1px solid #2d5237;
+  padding-bottom: 10px; margin-bottom: 14px;
+  font-size: 18px; color: #33ff66; letter-spacing: 4px;
+}
+#btn-refresh-rooms { margin-left: auto; font-size: 10px; }
+#btn-close-rooms { font-size: 10px; }
+
+#rooms-list { overflow-y: auto; }
+
+.room-listing {
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  padding: 6px; border-bottom: 1px solid #14251a; font-size: 12px;
+}
+.rl-name { flex: 1; min-width: 140px; color: #9dffb0; }
+.rl-lock { color: #ffd24a; }
+.rl-code { color: #ffd24a; letter-spacing: 2px; }
+.rl-phase { color: #7bbd8a; font-size: 11px; }
+.rl-slots, .rl-rules { color: #4a7a56; font-size: 10px; }
+.rl-join { font-size: 10px; }
+
+#rooms-hint { margin-top: 12px; font-size: 10px; color: #3a5a42; letter-spacing: 1px; }
+
+/* Настройки комнаты */
+#room-settings { margin-bottom: 10px; }
+
+#room-settings-view {
+  font-size: 11px; color: #7bbd8a;
+  border: 1px dashed #2d5237; padding: 6px;
+}
+
+#room-settings-form {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin-top: 8px; padding: 8px; border: 1px solid #1e3d26;
+}
+#room-settings-form label {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 10px; color: #4a7a56; letter-spacing: 1px;
+}
+#room-settings-form input[type="text"],
+#room-settings-form input[type="password"] { width: 120px; }
+#room-settings-form input[type="number"] { width: 62px; }
+#room-settings-form .checkbox-label { cursor: pointer; }
+#btn-save-settings { margin-left: auto; font-size: 10px; }
+
+.ctl-kick { color: #ff8888; border-color: #7a2d2d; }
+
+/* Чат: одинаковый блок в лобби и в сайдбаре */
+.chat-block { display: flex; flex-direction: column; gap: 6px; }
+
+.chat-log {
+  height: 120px; overflow-y: auto;
+  border: 1px solid #1e3d26; padding: 6px;
+  font-size: 11px; line-height: 1.45;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.chat-line { margin-bottom: 2px; word-break: break-word; }
+.chat-author { font-weight: bold; }
+.chat-text { color: #9dffb0; }
+.chat-system { color: #4a7a56; font-style: italic; }
+
+.chat-input-row { display: flex; gap: 6px; }
+.chat-input { flex: 1; min-width: 0; }
+.chat-send { font-size: 10px; }
+
+#chat-panel .chat-log { height: 96px; }
+
 #entry-hint { text-align: center; font-size: 10px; color: #3a5a42; margin-top: 12px; letter-spacing: 1px; }
 
 .lobby-label { font-size: 11px; color: #4a7a56; letter-spacing: 2px; margin: 8px 0 6px; }
@@ -241,7 +326,7 @@ input[type="text"]::placeholder { color: #3a5a42; text-transform: uppercase; }
   padding: 10px; overflow-y: auto; font-size: 12px; height: 100%;
 }
 
-#players-panel, #turn-panel, #weapon-panel, #inventory-panel, #shop-panel {
+#players-panel, #turn-panel, #weapon-panel, #inventory-panel, #shop-panel, #chat-panel {
   background-color: rgba(0,0,0,0.5);
   border: 1px solid #2d5237;
   padding: 8px; margin-bottom: 10px;

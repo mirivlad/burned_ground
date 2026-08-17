@@ -210,8 +210,15 @@ class UIScene extends Phaser.Scene {
     this.leaderboardModal = document.getElementById('leaderboard-modal');
     this.leaderboardList = document.getElementById('leaderboard-list');
 
+    // Список комнат
+    this.roomsModal = document.getElementById('rooms-modal');
+    this.roomsList = document.getElementById('rooms-list');
+
     // Комната
     this.roomScreen = document.getElementById('room-screen');
+    this.roomSettingsView = document.getElementById('room-settings-view');
+    this.roomSettingsForm = document.getElementById('room-settings-form');
+    this.entryRoomPassword = document.getElementById('entry-room-password');
     this.roomCodeEl = document.getElementById('room-code');
     this.roomPhaseLabel = document.getElementById('room-phase-label');
     this.roomSlotsEl = document.getElementById('room-slots');
@@ -302,6 +309,17 @@ class UIScene extends Phaser.Scene {
     });
 
     net.on('room_state', (d) => this.applyRoomState(d));
+    net.on('chat_message', (d) => this.appendChat(d));
+    net.on('chat_history', (d) => {
+      this.clearChat();
+      (d.messages || []).forEach(m => this.appendChat(m));
+    });
+    net.on('kicked', () => {
+      this.roomState = null;
+      this.showEntryScreen();
+      this.entryError.textContent = 'ВАС УДАЛИЛИ ИЗ КОМНАТЫ';
+      this.entryError.classList.remove('hidden');
+    });
     net.on('room_launched', () => this.showMessage('Лобби запущено — делитесь ссылкой!'));
     net.on('host_changed', (d) => {
       if (d.hostId === window.network.playerId) this.showMessage('Теперь вы хост');
@@ -333,6 +351,7 @@ class UIScene extends Phaser.Scene {
 
   setupEventHandlers() {
     this.setupAccountHandlers();
+    this.setupChat();
 
     // ==== Вход ====
     // Позывной запоминается: showEntryScreen подставит его при следующем заходе
@@ -345,21 +364,33 @@ class UIScene extends Phaser.Scene {
       window.network.createRoom(name, this.selectedColorIdx);
     });
 
-    document.getElementById('btn-join').addEventListener('click', () => {
+    const joinWith = (asSpectator, roomCode) => {
       const name = this.entryName.value.trim();
-      const code = this.entryCode.value.trim().toUpperCase();
+      const code = (roomCode || this.entryCode.value).trim().toUpperCase();
       if (!name || !code) return;
       rememberName(name);
-      window.network.joinRoom(code, name, this.selectedColorIdx, false);
+      window.network.joinRoom(
+        code, name, this.selectedColorIdx, asSpectator,
+        this.entryRoomPassword ? this.entryRoomPassword.value : ''
+      );
+    };
+
+    document.getElementById('btn-join').addEventListener('click', () => joinWith(false));
+    document.getElementById('btn-spectate').addEventListener('click', () => joinWith(true));
+    this.joinWith = joinWith;
+
+    document.getElementById('btn-rooms')?.addEventListener('click', () => this.showRooms());
+    document.getElementById('btn-refresh-rooms')?.addEventListener('click', () => this.showRooms());
+    document.getElementById('btn-close-rooms')?.addEventListener('click', () => this.closeRooms());
+    this.roomsModal?.addEventListener('click', (e) => {
+      if (e.target === this.roomsModal) this.closeRooms();
     });
 
-    document.getElementById('btn-spectate').addEventListener('click', () => {
-      const name = this.entryName.value.trim();
-      const code = this.entryCode.value.trim().toUpperCase();
-      if (!name || !code) return;
-      rememberName(name);
-      window.network.joinRoom(code, name, this.selectedColorIdx, true);
-    });
+    document.getElementById('btn-save-settings')?.addEventListener('click', () => this.saveSettings());
+
+    // Пока хост правит поля, room_state их не перетирает
+    ['set-name', 'set-rounds', 'set-turn', 'set-money', 'set-wind', 'set-public', 'set-password']
+      .forEach(id => document.getElementById(id)?.addEventListener('input', () => { this.settingsDirty = true; }));
 
     this.entryName.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') document.getElementById('btn-create').click();
@@ -406,14 +437,26 @@ class UIScene extends Phaser.Scene {
       if (e.target === this.shopModal) this.closeShop();
     });
 
-    // Горячие клавиши магазина (не срабатывают в полях ввода)
+    // Горячие клавиши (не срабатывают в полях ввода)
     document.addEventListener('keydown', (e) => {
-      if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+      if (document.activeElement && document.activeElement.tagName === 'INPUT') {
+        // Escape возвращает управление игре из поля чата
+        if (e.code === 'Escape') document.activeElement.blur();
+        return;
+      }
+
+      if (e.code === 'KeyT') {
+        const input = document.querySelector('#chat-panel .chat-input');
+        if (input) { e.preventDefault(); input.focus(); }
+        return;
+      }
+
       if (e.code === 'KeyB') {
         this.shopModal?.classList.contains('visible') ? this.closeShop() : this.openShop();
       } else if (e.code === 'Escape') {
         this.closeShop();
         this.closeLeaderboard();
+        this.closeRooms();
       }
     });
 
@@ -487,6 +530,159 @@ class UIScene extends Phaser.Scene {
     this.sidebarEl.classList.toggle('spectator', window.network.isSpectator());
   }
 
+  // ============================================
+  // ЧАТ
+  // ============================================
+
+  setupChat() {
+    // Блоков два (лобби и сайдбар), поведение общее
+    document.querySelectorAll('.chat-input').forEach(input => {
+      input.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        this.sendChat(input);
+      });
+    });
+
+    document.querySelectorAll('.chat-send').forEach(btn => {
+      const input = btn.parentElement.querySelector('.chat-input');
+      btn.addEventListener('click', () => this.sendChat(input));
+    });
+  }
+
+  sendChat(input) {
+    const text = input.value.trim();
+    if (!text) return;
+    window.network.sendChat(text);
+    input.value = '';
+  }
+
+  appendChat(msg) {
+    const line = document.createElement('div');
+
+    if (msg.system) {
+      line.className = 'chat-line chat-system';
+      line.textContent = msg.text;
+    } else {
+      line.className = 'chat-line';
+      const color = msg.colorIdx !== null && msg.colorIdx !== undefined
+        ? (window.CONSTANTS.PALETTE[msg.colorIdx]?.css || '#9dffb0')
+        : '#7bbd8a';
+      const tag = msg.isSpectator ? ' (зритель)' : '';
+      line.innerHTML =
+        `<span class="chat-author" style="color:${color}">${escapeHtml(msg.name)}${tag}:</span> ` +
+        `<span class="chat-text">${escapeHtml(msg.text)}</span>`;
+    }
+
+    document.querySelectorAll('.chat-log').forEach(log => {
+      log.appendChild(line.cloneNode(true));
+      log.scrollTop = log.scrollHeight;
+    });
+  }
+
+  clearChat() {
+    document.querySelectorAll('.chat-log').forEach(log => { log.innerHTML = ''; });
+  }
+
+  // ============================================
+  // СПИСОК ОТКРЫТЫХ КОМНАТ
+  // ============================================
+
+  async showRooms() {
+    if (!this.roomsModal) return;
+    this.roomsModal.classList.add('visible');
+    this.roomsList.innerHTML = '<div class="room-listing">загрузка...</div>';
+
+    const phases = {
+      awaiting: 'ждет игроков', playing: 'идет бой',
+      interRound: 'пауза между раундами', matchEnd: 'матч завершен'
+    };
+
+    try {
+      const rooms = await window.network.fetchRooms();
+      if (rooms.length === 0) {
+        this.roomsList.innerHTML = '<div class="room-listing">Открытых комнат нет — создайте свою</div>';
+        return;
+      }
+
+      this.roomsList.innerHTML = rooms.map(r => `
+        <div class="room-listing">
+          <span class="rl-name">${escapeHtml(r.name)}${r.hasPassword ? ' <span class="rl-lock">🔒</span>' : ''}</span>
+          <span class="rl-code">${r.id}</span>
+          <span class="rl-phase">${phases[r.phase] || r.phase}</span>
+          <span class="rl-slots">игроков ${r.players}/${r.slots} · свободно ${r.freeHumanSlots}</span>
+          <span class="rl-rules">${r.rounds} р. · ${r.turnSec}с</span>
+          <button class="rl-join" data-room="${r.id}">${r.freeHumanSlots > 0 ? 'ВОЙТИ' : 'НАБЛЮДАТЬ'}</button>
+        </div>
+      `).join('');
+
+      this.roomsList.querySelectorAll('.rl-join').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const room = rooms.find(r => r.id === btn.dataset.room);
+          this.entryCode.value = btn.dataset.room;
+          if (room && room.hasPassword && this.entryRoomPassword && !this.entryRoomPassword.value) {
+            this.closeRooms();
+            this.entryRoomPassword.focus();
+            this.showMessage('Комната под паролем — введите его и нажмите ВОЙТИ');
+            return;
+          }
+          this.closeRooms();
+          this.joinWith(!room || room.freeHumanSlots === 0, btn.dataset.room);
+        });
+      });
+    } catch (e) {
+      this.roomsList.innerHTML = `<div class="room-listing">Ошибка: ${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  closeRooms() {
+    this.roomsModal?.classList.remove('visible');
+  }
+
+  // ============================================
+  // НАСТРОЙКИ КОМНАТЫ
+  // ============================================
+
+  renderSettings(state, isHost) {
+    const s = state.settings;
+    if (!s || !this.roomSettingsView) return;
+
+    const lock = s.hasPassword ? ' · под паролем' : '';
+    const visibility = s.isPublic ? 'публичная' : 'приватная';
+    this.roomSettingsView.textContent =
+      `${s.name || 'Комната ' + state.roomId} · ${visibility}${lock} · раундов ${s.rounds}` +
+      ` · ход ${s.turnSec}с · старт $${s.startMoney} · ветер до ${s.maxWind}`;
+
+    const editable = isHost && state.phase !== 'playing' && state.phase !== 'interRound';
+    this.roomSettingsForm?.classList.toggle('hidden', !editable);
+    if (!editable || this.settingsDirty) return;
+
+    // Поля не перетираем, пока хост их правит (settingsDirty снимается после ПРИМЕНИТЬ)
+    const set = (id, value) => { const el = document.getElementById(id); if (el) el.value = value; };
+    set('set-name', s.name);
+    set('set-rounds', s.rounds);
+    set('set-turn', s.turnSec);
+    set('set-money', s.startMoney);
+    set('set-wind', s.maxWind);
+    const pub = document.getElementById('set-public');
+    if (pub) pub.checked = s.isPublic;
+  }
+
+  saveSettings() {
+    const num = (id) => Number(document.getElementById(id)?.value);
+    window.network.setSettings({
+      name: document.getElementById('set-name')?.value || '',
+      rounds: num('set-rounds'),
+      turnSec: num('set-turn'),
+      startMoney: num('set-money'),
+      maxWind: num('set-wind'),
+      isPublic: !!document.getElementById('set-public')?.checked,
+      password: document.getElementById('set-password')?.value || ''
+    });
+    this.settingsDirty = false;
+    this.showMessage('Настройки применены');
+    window.sound?.click();
+  }
+
   roomShareUrl() {
     return `${location.origin}/?room=${this.roomState ? this.roomState.roomId : ''}`;
   }
@@ -507,6 +703,8 @@ class UIScene extends Phaser.Scene {
     const myId = window.network.playerId;
     const isHost = myId && state.hostId === myId;
     const inMatch = state.phase === 'playing' || state.phase === 'interRound';
+
+    this.renderSettings(state, isHost);
 
     // Кнопки хоста
     this.hostControls.classList.toggle('hidden', !isHost || inMatch);
@@ -576,7 +774,13 @@ class UIScene extends Phaser.Scene {
       // Управление хоста
       let hostCtl = '';
       if (isHost) {
-        if (!inMatch && !slot.player) {
+        if (!inMatch && slot.player && slot.player.id !== state.hostId) {
+          hostCtl = `
+            <div class="slot-host-controls">
+              <button class="ctl-kick" data-slot="${i}">ВЫГНАТЬ</button>
+            </div>
+          `;
+        } else if (!inMatch && !slot.player) {
           hostCtl = `
             <div class="slot-host-controls">
               <select data-slot="${i}" class="ctl-kind">
@@ -615,6 +819,12 @@ class UIScene extends Phaser.Scene {
     this.roomSlotsEl.querySelectorAll('.slot-claim').forEach(btn => {
       btn.addEventListener('click', () => {
         window.network.claimSlot(parseInt(btn.dataset.slot, 10), this.selectedColorIdx);
+      });
+    });
+
+    this.roomSlotsEl.querySelectorAll('.ctl-kick').forEach(btn => {
+      btn.addEventListener('click', () => {
+        window.network.kickSlot(parseInt(btn.dataset.slot, 10));
       });
     });
 

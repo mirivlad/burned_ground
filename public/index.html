@@ -48,8 +48,12 @@
 
       <div class="entry-row">
         <input type="text" id="entry-code" placeholder="КОД КОМНАТЫ" maxlength="5" autocomplete="off">
+        <input type="password" id="entry-room-password" placeholder="ПАРОЛЬ (если есть)" maxlength="24" autocomplete="off">
+      </div>
+      <div class="entry-row">
         <button id="btn-join">ВОЙТИ</button>
         <button id="btn-spectate">НАБЛЮДАТЬ</button>
+        <button id="btn-rooms">СПИСОК КОМНАТ</button>
       </div>
 
       <div id="entry-hint">Создатель настраивает слоты и дает ссылку на вход</div>
@@ -67,6 +71,21 @@
 
       <div id="room-phase-label"></div>
 
+      <div class="lobby-label">// НАСТРОЙКИ МАТЧА:</div>
+      <div id="room-settings">
+        <div id="room-settings-view"></div>
+        <div id="room-settings-form" class="hidden">
+          <label>Название <input type="text" id="set-name" maxlength="24" placeholder="Комната"></label>
+          <label>Раундов <input type="number" id="set-rounds" min="1" max="15"></label>
+          <label>Ход, сек <input type="number" id="set-turn" min="15" max="180" step="5"></label>
+          <label>Старт, $ <input type="number" id="set-money" min="0" max="10000" step="100"></label>
+          <label>Ветер <input type="number" id="set-wind" min="0" max="25"></label>
+          <label class="checkbox-label"><input type="checkbox" id="set-public"> Публичная</label>
+          <label>Пароль <input type="password" id="set-password" maxlength="24" placeholder="без пароля"></label>
+          <button id="btn-save-settings">ПРИМЕНИТЬ</button>
+        </div>
+      </div>
+
       <div class="lobby-label">// СОСТАВ (слоты):</div>
       <div id="room-slots"></div>
 
@@ -81,6 +100,15 @@
 
       <div class="lobby-label">// ЗРИТЕЛИ:</div>
       <div id="room-spectators"></div>
+
+      <div class="lobby-label">// ЧАТ:</div>
+      <div class="chat-block">
+        <div class="chat-log"></div>
+        <div class="chat-input-row">
+          <input type="text" class="chat-input" maxlength="200" placeholder="Сообщение..." autocomplete="off">
+          <button class="chat-send">ОТПРАВИТЬ</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -126,6 +154,29 @@
         <div id="money-display">Деньги: $<span id="money-value">500</span></div>
         <button id="btn-open-shop">МАГАЗИН [B]</button>
       </div>
+
+      <div id="chat-panel">
+        <h2>Чат [T]</h2>
+        <div class="chat-block">
+          <div class="chat-log"></div>
+          <div class="chat-input-row">
+            <input type="text" class="chat-input" maxlength="200" placeholder="Enter — отправить" autocomplete="off">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Список открытых комнат -->
+  <div id="rooms-modal">
+    <div id="rooms-box">
+      <div id="rooms-header">
+        <span>ОТКРЫТЫЕ КОМНАТЫ</span>
+        <button id="btn-refresh-rooms">ОБНОВИТЬ</button>
+        <button id="btn-close-rooms">ЗАКРЫТЬ [ESC]</button>
+      </div>
+      <div id="rooms-list"></div>
+      <div id="rooms-hint">Приватные комнаты в списке не показываются — в них заходят по коду или ссылке</div>
     </div>
   </div>
 

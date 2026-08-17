@@ -231,19 +231,21 @@ io.on('connection', (socket) => {
     console.log(`Комната создана: ${room.id} (хост: ${host ? host.name : playerName})`);
   });
 
-  socket.on('join_room', ({ roomId, playerName, colorIdx, asSpectator } = {}) => {
+  socket.on('join_room', ({ roomId, playerName, colorIdx, asSpectator, password } = {}) => {
     if (socket.roomId && getRoom(socket.roomId)) {
       socket.emit('error', { message: 'Вы уже в комнате' });
       return;
     }
 
     const room = getRoom(roomId);
-    if (!room) {
+    if (!room || room.destroyed) {
       socket.emit('join_failed', { reason: 'Комната не найдена' });
       return;
     }
 
-    room.join(socket, { playerName, colorIdx, asSpectator });
+    const result = room.join(socket, { playerName, colorIdx, asSpectator, password });
+    if (result && result.error) return;
+
     console.log(`Комната ${room.id}: вход ${playerName}${asSpectator ? ' (зритель)' : ''}`);
   });
 
@@ -281,6 +283,9 @@ io.on('connection', (socket) => {
     socket.playerId = null;
     room.emitRoomState();
   }));
+  socket.on('chat', inRoom((room, d) => room.chat(socket, d || {})));
+  socket.on('set_settings', inRoom((room, d) => room.setSettings(socket, d || {})));
+  socket.on('kick_slot', inRoom((room, d) => room.kickSlot(socket, d || {})));
   socket.on('add_slot', inRoom((room, d) => room.addSlot(socket, d || {})));
   socket.on('remove_slot', inRoom((room, d) => room.removeSlot(socket, d || {})));
   socket.on('set_slot', inRoom((room, d) => room.setSlot(socket, d || {})));
@@ -320,14 +325,27 @@ io.on('connection', (socket) => {
   });
 });
 
-// Статистика комнат для мониторинга
+/**
+ * Список открытых комнат для лобби: только публичные и только те,
+ * куда есть смысл заходить. Приватные комнаты в выдачу не попадают —
+ * в них заходят по коду или ссылке.
+ */
 app.get('/api/rooms', (req, res) => {
+  const list = Array.from(rooms.values())
+    .filter(r => !r.destroyed && r.settings.isPublic && r.phase !== 'setup')
+    .map(r => r.listingInfo())
+    .sort((a, b) => (b.freeHumanSlots - a.freeHumanSlots) || (b.players - a.players));
+
+  res.json({ rooms: list });
+});
+
+// Техническая сводка для мониторинга (включая приватные комнаты)
+app.get('/api/health', (req, res) => {
   res.json({
-    rooms: Array.from(rooms.values()).map(r => ({
-      id: r.id, phase: r.phase,
-      players: r.playerOrderIds().length,
-      spectators: Object.keys(r.spectators).length
-    }))
+    ok: true,
+    uptimeSec: Math.round(process.uptime()),
+    rooms: rooms.size,
+    sockets: io.engine.clientsCount
   });
 });
 

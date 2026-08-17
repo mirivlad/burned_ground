@@ -68,7 +68,8 @@ class GameScene extends Phaser.Scene {
     if (this.windText) this.windText.destroy();
 
     const W = window.CONSTANTS.MAP_WIDTH;
-    const maxWind = window.CONSTANTS.GAME.maxWind;
+    // Шкала — из настроек комнаты: хост мог задать свой предел ветра
+    const maxWind = this.maxWind || window.CONSTANTS.GAME.maxWind;
     const cx = W / 2;
     const y = 26;
     const len = Math.round((Math.abs(wind) / maxWind) * 55);
@@ -132,6 +133,7 @@ class GameScene extends Phaser.Scene {
 
     this.round = round || 0;
     this.wind = wind || 0;
+    this.maxWind = data.maxWind || this.maxWind;
     this.lastSeed = data.terrainSeed || 1;
 
     this.buildWorld(data);

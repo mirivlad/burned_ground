@@ -118,8 +118,16 @@ class Network {
       this.socket.on(event, (data) => this.emit(event, data));
     };
 
+    this.socket.on('kicked', (d) => {
+      this.clearSession();
+      this.roomId = null;
+      this.playerId = null;
+      this.emit('kicked', d);
+    });
+
     [
       'room_launched', 'host_changed', 'inter_round', 'special_update',
+      'chat_message', 'chat_history',
       'match_start', 'round_start', 'turn_start', 'turn_timeout',
       'shot', 'explosion', 'terrain_update', 'tank_update', 'players_update',
       'hp_update', 'death', 'fall_damage', 'player_disconnected',
@@ -215,9 +223,26 @@ class Network {
     this.socket.emit('create_room', { playerName, colorIdx });
   }
 
-  joinRoom(roomId, playerName, colorIdx, asSpectator) {
+  joinRoom(roomId, playerName, colorIdx, asSpectator, password) {
     this.playerName = playerName;
-    this.socket.emit('join_room', { roomId, playerName, colorIdx, asSpectator });
+    this.socket.emit('join_room', { roomId, playerName, colorIdx, asSpectator, password });
+  }
+
+  sendChat(text) {
+    this.socket.emit('chat', { text });
+  }
+
+  setSettings(patch) {
+    this.socket.emit('set_settings', patch);
+  }
+
+  kickSlot(slotIndex) {
+    this.socket.emit('kick_slot', { slotIndex });
+  }
+
+  async fetchRooms() {
+    const d = await this.api('/api/rooms');
+    return d.rooms || [];
   }
 
   claimSlot(slotIndex, colorIdx) {

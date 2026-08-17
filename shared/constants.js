@@ -55,7 +55,24 @@
     maxSlots: 10,                    // максимум слотов в комнате
     codeLength: 5,
     emptyTTL: 10 * 60 * 1000,        // пустая комната живёт 10 минут
-    shareBaseUrl: ''                 // ссылка строится на клиенте от location.origin
+    shareBaseUrl: '',                // ссылка строится на клиенте от location.origin
+    nameMaxLength: 24,
+    passwordMaxLength: 24
+  };
+
+  const CHAT = {
+    maxLength: 200,
+    historySize: 50,        // сколько строк видит вошедший
+    windowMs: 5000,
+    maxPerWindow: 5         // антиспам: 5 сообщений за 5 секунд на сокет
+  };
+
+  // Границы настроек матча: хост крутит их в этих рамках, сервер клампит
+  const SETTINGS_LIMITS = {
+    rounds: { min: 1, max: 15, def: GAME.roundsInMatch },
+    turnSec: { min: 15, max: 180, def: GAME.turnTimeLimit / 1000 },
+    startMoney: { min: 0, max: 10000, step: 100, def: GAME.startingMoney },
+    maxWind: { min: 0, max: 25, def: GAME.maxWind }
   };
 
   // Палитра: 10 хорошо различимых цветов на тёмном фоне
@@ -100,6 +117,8 @@
     GAME,
     ECONOMY,
     ROOM,
+    CHAT,
+    SETTINGS_LIMITS,
     PALETTE,
     BOT,
     ANGLE,

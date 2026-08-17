@@ -6,7 +6,7 @@
 const crypto = require('crypto');
 
 const {
-  MAP_WIDTH, PHYSICS, GAME, ECONOMY, ROOM, PALETTE
+  MAP_WIDTH, PHYSICS, GAME, ECONOMY, ROOM, CHAT, SETTINGS_LIMITS, PALETTE
 } = require('./shared/constants');
 const { getWeapon, BASE_WEAPON_ID } = require('./shared/weapons');
 const {
@@ -24,6 +24,12 @@ const { decideShot, thinkDelay, botName } = require('./bot');
 
 let nextBotIndex = 0;
 
+const clampInt = (value, { min, max }, fallback) => {
+  const n = Math.round(Number(value));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+};
+
 class Room {
   /**
    * @param {Server} io
@@ -33,18 +39,32 @@ class Room {
   constructor(io, id, { hostSocket, hostName, hostColorIdx, config, onMatchEnd }) {
     this.io = io;
     this.id = id;
-    this.config = config;              // { rounds, turnMs, reconnectMs }
+    this.baseConfig = config;          // дефолты процесса (env)
     this.onMatchEnd = onMatchEnd || null;
     this.createdAt = Date.now();
     this.destroyed = false;
 
+    // Настройки матча: хост меняет их до старта, сервер клампит по SETTINGS_LIMITS
+    this.settings = {
+      name: '',
+      isPublic: true,
+      password: '',
+      rounds: config.rounds,
+      turnSec: Math.round(config.turnMs / 1000),
+      startMoney: GAME.startingMoney,
+      maxWind: GAME.maxWind
+    };
+    this.applySettingsToConfig();
+
     this.phase = 'setup';              // setup | awaiting | playing | interRound | matchEnd
     this.hostId = null;                // participant id хоста
+    this.banned = new Set();           // playerId и userId выгнанных хостом
     this.lastHumanActivity = Date.now(); // для уборки комнат без людей
 
     this.slots = [];                   // { kind:'human'|'bot', difficulty, colorIdx, playerId|null }
     this.players = {};                 // participantId -> player (люди + боты)
     this.spectators = {};              // socketId -> { name }
+    this.chatLog = [];                 // последние CHAT.historySize сообщений
 
     // Состояние матча
     this.round = 0;
@@ -57,6 +77,155 @@ class Room {
     this.currentPlayerIndex = 0;
     this.turnStartTime = 0;
     this.timers = { turn: null, resolve: null, round: null, match: null, bot: null };
+  }
+
+  // ============================================
+  // НАСТРОЙКИ МАТЧА
+  // ============================================
+
+  applySettingsToConfig() {
+    this.config = {
+      rounds: this.settings.rounds,
+      turnMs: this.settings.turnSec * 1000,
+      reconnectMs: this.baseConfig.reconnectMs
+    };
+  }
+
+  /**
+   * Хост меняет параметры матча. Во время боя настройки заморожены:
+   * менять число раундов или время хода на ходу — источник рассинхрона.
+   */
+  setSettings(socket, patch = {}) {
+    if (!this.isHost(socket)) return;
+    if (this.phase === 'playing' || this.phase === 'interRound') {
+      socket.emit('error', { message: 'Настройки нельзя менять во время матча' });
+      return;
+    }
+
+    const s = this.settings;
+
+    if (patch.name !== undefined) {
+      s.name = String(patch.name).trim().slice(0, ROOM.nameMaxLength);
+    }
+    if (patch.isPublic !== undefined) {
+      s.isPublic = !!patch.isPublic;
+    }
+    if (patch.password !== undefined) {
+      s.password = String(patch.password).slice(0, ROOM.passwordMaxLength);
+    }
+    if (patch.rounds !== undefined) {
+      s.rounds = clampInt(patch.rounds, SETTINGS_LIMITS.rounds, s.rounds);
+    }
+    if (patch.turnSec !== undefined) {
+      s.turnSec = clampInt(patch.turnSec, SETTINGS_LIMITS.turnSec, s.turnSec);
+    }
+    if (patch.startMoney !== undefined) {
+      s.startMoney = clampInt(patch.startMoney, SETTINGS_LIMITS.startMoney, s.startMoney);
+    }
+    if (patch.maxWind !== undefined) {
+      s.maxWind = clampInt(patch.maxWind, SETTINGS_LIMITS.maxWind, s.maxWind);
+    }
+
+    this.applySettingsToConfig();
+    this.emitRoomState();
+  }
+
+  // Настройки для клиента: пароль наружу не уходит
+  publicSettings() {
+    return {
+      name: this.settings.name,
+      isPublic: this.settings.isPublic,
+      hasPassword: !!this.settings.password,
+      rounds: this.settings.rounds,
+      turnSec: this.settings.turnSec,
+      startMoney: this.settings.startMoney,
+      maxWind: this.settings.maxWind
+    };
+  }
+
+  // Строка для списка комнат в лобби
+  listingInfo() {
+    const slots = this.slots.length;
+    const taken = this.slots.filter(s => s.playerId).length;
+
+    return {
+      id: this.id,
+      name: this.settings.name || `Комната ${this.id}`,
+      phase: this.phase,
+      hasPassword: !!this.settings.password,
+      players: taken,
+      slots,
+      freeHumanSlots: this.slots.filter(s => s.kind === 'human' && !s.playerId).length,
+      spectators: Object.keys(this.spectators).length,
+      rounds: this.settings.rounds,
+      turnSec: this.settings.turnSec
+    };
+  }
+
+  // ============================================
+  // ЧАТ
+  // ============================================
+
+  /**
+   * Сообщение в чат комнаты. Пишут и участники, и зрители.
+   * Лимит — 5 сообщений за 5 секунд на сокет: чат не должен превращаться
+   * в средство залить экран сопернику во время его хода.
+   */
+  chat(socket, { text } = {}) {
+    const clean = String(text || '')
+      .replace(/[\x00-\x1f\x7f]/g, ' ')   // управляющие символы и переводы строк
+      .trim()
+      .slice(0, CHAT.maxLength);
+
+    if (!clean) return;
+
+    const now = Date.now();
+    const bucket = socket.chatBucket && socket.chatBucket.resetAt > now
+      ? socket.chatBucket
+      : { count: 0, resetAt: now + CHAT.windowMs };
+
+    bucket.count++;
+    socket.chatBucket = bucket;
+
+    if (bucket.count > CHAT.maxPerWindow) {
+      if (bucket.count === CHAT.maxPerWindow + 1) {
+        socket.emit('error', { message: 'Слишком часто. Подождите пару секунд' });
+      }
+      return;
+    }
+
+    const player = socket.playerId ? this.players[socket.playerId] : null;
+    const spectator = this.spectators[socket.id];
+    if (!player && !spectator) return;
+
+    const message = {
+      name: player ? player.name : spectator.name,
+      colorIdx: player ? player.colorIdx : null,
+      isGuest: player ? !!player.isGuest : true,
+      isSpectator: !player,
+      text: clean,
+      at: now
+    };
+
+    this.pushChat(message);
+    this.emit('chat_message', message);
+  }
+
+  /** Системная строка (кик, старт матча) идет тем же потоком, что и чат */
+  systemMessage(text) {
+    const message = { system: true, text: String(text), at: Date.now() };
+    this.pushChat(message);
+    this.emit('chat_message', message);
+  }
+
+  pushChat(message) {
+    this.chatLog.push(message);
+    if (this.chatLog.length > CHAT.historySize) this.chatLog.shift();
+  }
+
+  /** Вошедший должен видеть контекст разговора, а не пустое окно */
+  sendChatHistory(socket) {
+    if (this.chatLog.length) socket.emit('chat_history', { messages: this.chatLog });
   }
 
   // ============================================
@@ -97,6 +266,7 @@ class Room {
       roomId: this.id,
       phase: this.phase,
       hostId: this.hostId,
+      settings: this.publicSettings(),
       round: this.round,
       maxRounds: this.config.rounds,
       slots: this.slots.map(s => ({
@@ -238,7 +408,17 @@ class Room {
   /**
    * Вход в комнату: участником (займет свободный слот человека) или зрителем.
    */
-  join(socket, { playerName, colorIdx, asSpectator }) {
+  join(socket, { playerName, colorIdx, asSpectator, password }) {
+    if (this.isBanned(socket)) {
+      socket.emit('join_failed', { reason: 'Вас удалили из этой комнаты' });
+      return { error: true };
+    }
+
+    if (this.settings.password && String(password || '') !== this.settings.password) {
+      socket.emit('join_failed', { reason: 'Неверный пароль комнаты' });
+      return { error: true };
+    }
+
     socket.join(this.id);
     socket.roomId = this.id;
 
@@ -259,6 +439,7 @@ class Room {
       spectator: true,
       room: this.roomState()
     });
+    this.sendChatHistory(socket);
 
     if (this.phase === 'playing' || this.phase === 'interRound') {
       socket.emit('game_snapshot', this.gameSnapshot());
@@ -305,6 +486,8 @@ class Room {
       colorIdx: color,
       room: this.roomState()
     });
+    this.sendChatHistory(socket);
+    this.systemMessage(`${player.name} занял слот`);
 
     // Матч идет: игрок вступит со следующего раунда
     if (this.phase === 'playing' || this.phase === 'interRound') {
@@ -324,6 +507,7 @@ class Room {
   rebind(socket, playerId, secret) {
     const p = this.players[playerId];
     if (!p || p.isBot) return false;
+    if (this.banned.has(playerId) || this.isBanned(socket)) return false;
 
     const bySecret = !!p.sessionSecret && typeof secret === 'string' &&
       secret.length === p.sessionSecret.length &&
@@ -367,6 +551,7 @@ class Room {
       power: p.power
     });
 
+    this.sendChatHistory(socket);
     this.emitPlayers();
     this.emitRoomState();
     return true;
@@ -479,6 +664,50 @@ class Room {
 
   isHost(socket) {
     return socket.playerId && socket.playerId === this.hostId;
+  }
+
+  isBanned(socket) {
+    if (socket.userId && this.banned.has('u' + socket.userId)) return true;
+    if (this.banned.has('s' + socket.id)) return true;
+    return !!socket.playerId && this.banned.has(socket.playerId);
+  }
+
+  /**
+   * Хост выгоняет участника. Аккаунт банится по userId, гость — по playerId
+   * (под новым именем гость сможет вернуться: от этого спасает пароль комнаты).
+   */
+  kickSlot(socket, { slotIndex }) {
+    if (!this.isHost(socket)) return;
+
+    const slot = this.slots[slotIndex];
+    if (!slot || !slot.playerId) return;
+
+    const target = this.players[slot.playerId];
+    if (!target) return;
+
+    if (target.id === this.hostId) {
+      socket.emit('error', { message: 'Нельзя выгнать самого себя' });
+      return;
+    }
+
+    if (!target.isBot) {
+      // Аккаунт банится намертво, гость — по сокету и по playerId: под новым
+      // соединением и новым именем он вернется, от этого спасает пароль комнаты
+      this.banned.add(target.id);
+      if (target.userId) this.banned.add('u' + target.userId);
+
+      const targetSocket = target.socketId ? this.io.sockets.sockets.get(target.socketId) : null;
+      if (targetSocket) {
+        this.banned.add('s' + targetSocket.id);
+        targetSocket.emit('kicked', { roomId: this.id });
+        targetSocket.leave(this.id);
+        targetSocket.roomId = null;
+        targetSocket.playerId = null;
+      }
+    }
+
+    this.systemMessage(`${target.name} удален из комнаты хостом`);
+    this.removeParticipant(target.id);
   }
 
   addSlot(socket, { kind, difficulty }) {
@@ -616,7 +845,7 @@ class Room {
 
     for (const pid of participants) {
       const p = this.players[pid];
-      p.money = GAME.startingMoney;
+      p.money = this.settings.startMoney;
       p.inventory = { [BASE_WEAPON_ID]: Infinity };
       p.activeWeaponId = BASE_WEAPON_ID;
       p.kills = 0;
@@ -644,7 +873,7 @@ class Room {
     this.round++;
     this.terrainSeed = Math.floor(Math.random() * 1000000);
     this.terrain = generateTerrain(this.terrainSeed);
-    this.wind = Math.round((Math.random() - 0.5) * 2 * GAME.maxWind * 10) / 10;
+    this.wind = Math.round((Math.random() - 0.5) * 2 * this.settings.maxWind * 10) / 10;
 
     for (const pid of this.playerOrderIds()) {
       const p = this.players[pid];
@@ -672,6 +901,7 @@ class Room {
       heights: this.terrain,
       tanks: this.tanks,
       wind: this.wind,
+      maxWind: this.settings.maxWind,   // шкала индикатора ветра — из настроек комнаты
       players: this.playersSnapshot(),
       serverTime: Date.now()
     });
