@@ -40,18 +40,22 @@ class UIScene extends Phaser.Scene {
 
   async initAccount() {
     const me = await window.network.fetchMe();
-    if (me) this.showProfile(me.user, me.stats);
+    if (me) this.showProfile(me.user, me.stats, me.matches);
   }
 
-  showProfile(user, stats) {
+  showProfile(user, stats, matches) {
     if (!this.profileLine) return;
 
-    const s = stats || { matches: 0, wins: 0, kills: 0, earned: 0, winRate: 0 };
+    const s = stats || { matches: 0, wins: 0, kills: 0, earned: 0, winRate: 0, elo: 1000, rankedGames: 0 };
     this.profileLine.classList.remove('hidden');
     this.profileLine.innerHTML =
-      `<b>${escapeHtml(user.username)}</b> · матчей <span class="stat">${s.matches}</span>` +
+      `<b>${escapeHtml(user.username)}</b> · <span class="stat elo">${s.elo ?? 1000} ELO</span>` +
+      (s.rankedGames ? ` (рейтинговых ${s.rankedGames})` : ' (нет рейтинговых матчей)') +
+      ` · матчей <span class="stat">${s.matches}</span>` +
       ` · побед <span class="stat">${s.wins}</span> (${s.winRate}%)` +
       ` · убийств <span class="stat">${s.kills}</span> · заработано <span class="stat">$${s.earned}</span>`;
+
+    this.renderHistory(matches);
 
     this.btnLogout?.classList.remove('hidden');
     document.getElementById('btn-login')?.classList.add('hidden');
@@ -66,8 +70,73 @@ class UIScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Последние матчи: место, состав и изменение рейтинга.
+   */
+  renderHistory(matches) {
+    if (!this.profileHistory) return;
+
+    if (!matches || matches.length === 0) {
+      this.profileHistory.classList.add('hidden');
+      this.profileHistory.innerHTML = '';
+      return;
+    }
+
+    this.profileHistory.classList.remove('hidden');
+    this.profileHistory.innerHTML =
+      '<div class="lobby-label">// ПОСЛЕДНИЕ МАТЧИ:</div>' +
+      matches.map(m => {
+        const delta = m.eloDelta === null || m.eloDelta === undefined
+          ? '<span class="history-unranked">без рейтинга</span>'
+          : `<span class="${m.eloDelta >= 0 ? 'history-up' : 'history-down'}">${m.eloDelta >= 0 ? '+' : ''}${m.eloDelta} ELO</span>`;
+
+        const myName = window.network.account?.username;
+        const rivals = (m.composition || [])
+          .filter(c => c.name !== myName)
+          .map(c => escapeHtml(c.name) + (c.isBot ? ' [бот]' : (c.isGuest ? ' [гость]' : '')))
+          .join(', ') || 'соперники не записаны';
+
+        return `
+          <div class="history-row">
+            <span class="history-place">${m.place || '-'} место</span>
+            <span class="history-kills">убийств ${m.kills}</span>
+            <span class="history-rounds">раундов ${m.roundsWon}</span>
+            ${delta}
+            <div class="history-rivals">${rivals}</div>
+          </div>
+        `;
+      }).join('');
+  }
+
+  async showLeaderboard() {
+    if (!this.leaderboardModal) return;
+    this.leaderboardModal.classList.add('visible');
+    this.leaderboardList.innerHTML = '<div class="leader-row">загрузка...</div>';
+
+    try {
+      const leaders = await window.network.fetchLeaderboard(50);
+      this.leaderboardList.innerHTML = leaders.length === 0
+        ? '<div class="leader-row">Рейтинговых матчей еще не было</div>'
+        : leaders.map(l => `
+            <div class="leader-row ${l.username === window.network.account?.username ? 'leader-me' : ''}">
+              <span class="leader-rank">${l.rank}</span>
+              <span class="leader-name">${escapeHtml(l.username)}</span>
+              <span class="leader-elo">${l.elo}</span>
+              <span class="leader-extra">пик ${l.peakElo} · матчей ${l.rankedGames} · побед ${l.wins}</span>
+            </div>
+          `).join('');
+    } catch (e) {
+      this.leaderboardList.innerHTML = `<div class="leader-row">Ошибка: ${escapeHtml(e.message)}</div>`;
+    }
+  }
+
+  closeLeaderboard() {
+    this.leaderboardModal?.classList.remove('visible');
+  }
+
   hideProfile() {
     this.profileLine?.classList.add('hidden');
+    this.profileHistory?.classList.add('hidden');
     this.btnLogout?.classList.add('hidden');
     document.getElementById('btn-login')?.classList.remove('hidden');
     document.getElementById('btn-register')?.classList.remove('hidden');
@@ -90,7 +159,7 @@ class UIScene extends Phaser.Scene {
           : await window.network.login(username, password);
         this.authPassword.value = '';
         const me = await window.network.fetchMe();
-        this.showProfile(d.user, me ? me.stats : null);
+        this.showProfile(d.user, me ? me.stats : null, me ? me.matches : null);
         window.sound?.coin();
         this.showMessage(register ? 'Аккаунт создан' : `С возвращением, ${d.user.username}!`);
       } catch (e) {
@@ -114,6 +183,12 @@ class UIScene extends Phaser.Scene {
       this.hideProfile();
       this.showMessage('Вы вышли из аккаунта');
     });
+
+    document.getElementById('btn-leaderboard')?.addEventListener('click', () => this.showLeaderboard());
+    document.getElementById('btn-close-leaderboard')?.addEventListener('click', () => this.closeLeaderboard());
+    this.leaderboardModal?.addEventListener('click', (e) => {
+      if (e.target === this.leaderboardModal) this.closeLeaderboard();
+    });
   }
 
   setupUIElements() {
@@ -130,7 +205,10 @@ class UIScene extends Phaser.Scene {
     this.authUsername = document.getElementById('auth-username');
     this.authPassword = document.getElementById('auth-password');
     this.profileLine = document.getElementById('profile-line');
+    this.profileHistory = document.getElementById('profile-history');
     this.btnLogout = document.getElementById('btn-logout');
+    this.leaderboardModal = document.getElementById('leaderboard-modal');
+    this.leaderboardList = document.getElementById('leaderboard-list');
 
     // Комната
     this.roomScreen = document.getElementById('room-screen');
@@ -335,6 +413,7 @@ class UIScene extends Phaser.Scene {
         this.shopModal?.classList.contains('visible') ? this.closeShop() : this.openShop();
       } else if (e.code === 'Escape') {
         this.closeShop();
+        this.closeLeaderboard();
       }
     });
 
@@ -790,11 +869,15 @@ class UIScene extends Phaser.Scene {
     if (this.interroundInterval) clearInterval(this.interroundInterval);
     this.interroundOverlay.classList.remove('visible');
 
-    const scores = [...(data.finalScores || [])].sort((a, b) =>
-      (b.kills * 1000 + b.totalEarned) - (a.kills * 1000 + a.totalEarned)
-    );
+    // Места считает сервер: раунды важнее фрагов, фраги важнее денег
+    const scores = [...(data.finalScores || [])].sort((a, b) => (a.place || 99) - (b.place || 99));
 
     this.showMatchResults(scores);
+
+    // Рейтинг мог измениться — обновляем профиль к возврату на экран входа
+    window.network.fetchMe().then(me => {
+      if (me) this.showProfile(me.user, me.stats, me.matches);
+    });
   }
 
   handleMatchReset() {
@@ -991,13 +1074,17 @@ class UIScene extends Phaser.Scene {
     overlay.innerHTML = `
       <div id="match-results">
         <h1>МАТЧ ЗАВЕРШЕН</h1>
-        ${scores.map((s, i) => `
-          <div class="stat-row ${i === 0 ? 'winner-highlight' : ''}">
-            <span>${i + 1}. ${escapeHtml(s.name)}${s.isBot ? ' [бот]' : ''}</span>
-            <span>Убийств: ${s.kills}</span>
-            <span>$${s.totalEarned}</span>
-          </div>
-        `).join('')}
+        ${scores.map(s => {
+          const tag = s.isBot ? ' [бот]' : (s.isGuest ? ' [гость]' : '');
+          return `
+            <div class="stat-row ${s.won ? 'winner-highlight' : ''}">
+              <span>${s.place || '-'}. ${escapeHtml(s.name)}${tag}</span>
+              <span>Раундов: ${s.roundWins || 0}</span>
+              <span>Убийств: ${s.kills}</span>
+              <span>$${s.totalEarned}</span>
+            </div>
+          `;
+        }).join('')}
       </div>
     `;
 

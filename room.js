@@ -622,6 +622,7 @@ class Room {
       p.kills = 0;
       p.totalEarned = 0;
       p.roundEarned = 0;
+      p.roundWins = 0;
       p.hp = 100;
       p.isAlive = true;
     }
@@ -759,9 +760,11 @@ class Room {
     this.clearTimers();
 
     if (winnerId && this.players[winnerId]) {
-      const bonus = this.players[winnerId].roundEarned;
+      const winner = this.players[winnerId];
+      winner.roundWins = (winner.roundWins || 0) + 1;
+
+      const bonus = winner.roundEarned;
       if (bonus > 0) {
-        const winner = this.players[winnerId];
         winner.money += bonus;
         winner.totalEarned += bonus;
         this.emit('money_update', { playerId: winnerId, amount: bonus, reason: 'round_win' });
@@ -809,23 +812,42 @@ class Room {
     this.phase = 'matchEnd';
     this.clearTimers();
 
-    const finalScores = this.playerOrderIds().map(pid => {
-      const p = this.players[pid];
+    // Места: выигранные раунды важнее всего (как в классике — таблица по
+    // раундам), дальше фраги, дальше заработок. Равные показатели — равное место.
+    const rank = (p) => [p.roundWins || 0, p.kills, Math.round(p.totalEarned)];
+    const cmp = (a, b) => {
+      const ra = rank(a), rb = rank(b);
+      for (let i = 0; i < ra.length; i++) if (rb[i] !== ra[i]) return rb[i] - ra[i];
+      return 0;
+    };
+
+    const ordered = this.playerOrderIds().map(pid => this.players[pid]).sort(cmp);
+
+    let place = 0;
+    let prev = null;
+    const finalScores = ordered.map((p, i) => {
+      if (!prev || cmp(prev, p) !== 0) place = i + 1;   // ничья делит место
+      prev = p;
       return {
-        playerId: pid, name: p.name, kills: p.kills,
-        totalEarned: p.totalEarned, isBot: p.isBot,
-        userId: p.userId || null
+        playerId: p.id,
+        name: p.name,
+        kills: p.kills,
+        totalEarned: p.totalEarned,
+        roundWins: p.roundWins || 0,
+        isBot: !!p.isBot,
+        isGuest: !!p.isGuest,
+        userId: p.userId || null,
+        place
       };
     });
 
-    this.emit('match_end', { finalScores });
+    // Победитель — первое место среди людей: проигрыш боту не засчитывается победой
+    const champion = finalScores.find(s => s.place === 1 && !s.isBot) || null;
+    const scores = finalScores.map(s => ({ ...s, won: !!champion && s === champion }));
 
-    // Запись в историю для авторизованных игроков
-    if (this.onMatchEnd && finalScores.length > 0) {
-      const best = finalScores.reduce((a, b) =>
-        (b.kills * 1000 + b.totalEarned) > (a.kills * 1000 + a.totalEarned) ? b : a
-      );
-      const scores = finalScores.map(s => ({ ...s, won: s === best && !s.isBot }));
+    this.emit('match_end', { finalScores: scores });
+
+    if (this.onMatchEnd && scores.length > 0) {
       try {
         this.onMatchEnd(this.id, this.config.rounds, scores);
       } catch (e) {

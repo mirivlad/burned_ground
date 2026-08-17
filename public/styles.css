@@ -101,6 +101,60 @@ input[type="text"]::placeholder { color: #3a5a42; text-transform: uppercase; }
   border: 1px dashed #2d5237; padding: 6px;
 }
 #profile-line .stat { color: #ffd24a; }
+#profile-line .elo { color: #55ffff; font-weight: bold; }
+
+/* История матчей в профиле */
+#profile-history { margin: 6px 0 4px; font-size: 11px; }
+
+.history-row {
+  border-left: 3px solid #2d5237; padding: 4px 8px; margin-bottom: 4px;
+  background: rgba(58,157,35,0.06);
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline;
+}
+.history-place { color: #ffd24a; min-width: 68px; }
+.history-kills, .history-rounds { color: #7bbd8a; }
+.history-up { color: #66ff66; }
+.history-down { color: #ff5555; }
+.history-unranked { color: #4a7a56; }
+.history-rivals { width: 100%; color: #4a7a56; font-size: 10px; }
+
+/* Таблица лидеров */
+#leaderboard-modal {
+  position: fixed; inset: 0; z-index: 6500;
+  display: none; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.85);
+}
+#leaderboard-modal.visible { display: flex; }
+
+#leaderboard-box {
+  width: 620px; max-width: 94vw; max-height: 90vh;
+  display: flex; flex-direction: column;
+  border: 2px double #33ff66;
+  box-shadow: 0 0 40px rgba(51, 255, 102, 0.25);
+  background: #050a06; padding: 18px 24px; color: #9dffb0;
+}
+
+#leaderboard-header {
+  display: flex; align-items: center; gap: 14px;
+  border-bottom: 1px solid #2d5237;
+  padding-bottom: 10px; margin-bottom: 14px;
+  font-size: 18px; color: #33ff66; letter-spacing: 4px;
+}
+#btn-close-leaderboard { margin-left: auto; font-size: 10px; }
+
+#leaderboard-list { overflow-y: auto; }
+
+.leader-row {
+  display: flex; gap: 10px; align-items: baseline;
+  padding: 5px 6px; border-bottom: 1px solid #14251a; font-size: 12px;
+}
+.leader-row.leader-me { background: rgba(255,210,74,0.10); }
+.leader-rank { color: #4a7a56; min-width: 26px; }
+.leader-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.leader-elo { color: #55ffff; font-weight: bold; min-width: 48px; text-align: right; }
+.leader-extra { color: #4a7a56; font-size: 10px; }
+
+#leaderboard-hint { margin-top: 12px; font-size: 10px; color: #3a5a42; letter-spacing: 1px; }
 
 #entry-hint { text-align: center; font-size: 10px; color: #3a5a42; margin-top: 12px; letter-spacing: 1px; }
 

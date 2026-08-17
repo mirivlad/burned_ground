@@ -27,8 +27,10 @@
           <button id="btn-login">ВОЙТИ</button>
           <button id="btn-register">РЕГИСТРАЦИЯ</button>
           <button id="btn-logout" class="hidden">ВЫЙТИ</button>
+          <button id="btn-leaderboard">РЕЙТИНГ</button>
         </div>
         <div id="profile-line" class="hidden"></div>
+        <div id="profile-history" class="hidden"></div>
       </div>
 
       <div class="entry-row">
@@ -124,6 +126,18 @@
         <div id="money-display">Деньги: $<span id="money-value">500</span></div>
         <button id="btn-open-shop">МАГАЗИН [B]</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Таблица лидеров -->
+  <div id="leaderboard-modal">
+    <div id="leaderboard-box">
+      <div id="leaderboard-header">
+        <span>ТАБЛИЦА ЛИДЕРОВ</span>
+        <button id="btn-close-leaderboard">ЗАКРЫТЬ [ESC]</button>
+      </div>
+      <div id="leaderboard-list"></div>
+      <div id="leaderboard-hint">Рейтинг меняется только в матчах, где минимум двое играют с аккаунтами</div>
     </div>
   </div>
 

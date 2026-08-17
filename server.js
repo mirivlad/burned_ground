@@ -112,13 +112,28 @@ app.post('/api/auth/logout', (req, res) => {
 app.get('/api/me', (req, res) => {
   const user = auth.userByToken(tokenFromReq(req));
   if (!user) return res.status(401).json({ error: 'Не авторизован' });
-  res.json({ user, stats: auth.userStats(user.id) });
+  res.json({
+    user,
+    stats: auth.userStats(user.id),
+    matches: auth.userMatches(user.id, 10)
+  });
 });
 
 app.get('/api/stats/:username', (req, res) => {
   const stats = auth.userStatsByName(req.params.username);
   if (!stats) return res.status(404).json({ error: 'Игрок не найден' });
   res.json(stats);
+});
+
+app.get('/api/profile/:username', (req, res) => {
+  const profile = auth.userProfile(req.params.username);
+  if (!profile) return res.status(404).json({ error: 'Игрок не найден' });
+  res.json(profile);
+});
+
+app.get('/api/leaderboard', (req, res) => {
+  const limit = parseInt(req.query.limit, 10) || 50;
+  res.json({ leaders: auth.leaderboard(limit) });
 });
 
 // ============================================

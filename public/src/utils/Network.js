@@ -162,6 +162,15 @@ class Network {
     return d;
   }
 
+  async fetchLeaderboard(limit = 50) {
+    const d = await this.api(`/api/leaderboard?limit=${limit}`);
+    return d.leaders || [];
+  }
+
+  async fetchProfile(username) {
+    return this.api(`/api/profile/${encodeURIComponent(username)}`);
+  }
+
   async fetchMe() {
     if (!this.authToken) return null;
     try {
