@@ -134,14 +134,17 @@
       <div id="weapon-panel">
         <h2>Оружие</h2>
         <div id="angle-control">
-          <label>Угол: <span id="angle-value">90</span>°</label>
+          <label>Угол: <input type="number" id="angle-value" min="0" max="180" value="90" step="1">°</label>
           <input type="range" id="angle-slider" min="0" max="180" value="90">
         </div>
         <div id="power-control">
-          <label>Мощность: <span id="power-value">70</span>%</label>
+          <label>Мощность: <input type="number" id="power-value" min="0" max="100" value="70" step="1">%</label>
           <input type="range" id="power-slider" min="0" max="100" value="70">
         </div>
-        <div class="input-hint">&larr;&rarr; угол &middot; &uarr;&darr; мощность &middot; ПРОБЕЛ выстрел</div>
+        <div class="input-hint">
+          &larr;&rarr; угол &middot; &uarr;&darr; мощность &middot; SHIFT — шаг 10 &middot; ПРОБЕЛ выстрел<br>
+          значения можно вводить числом
+        </div>
       </div>
 
       <div id="inventory-panel">
@@ -224,6 +227,7 @@
   <script src="/socket.io/socket.io.js"></script>
   <script src="/shared/constants.js"></script>
   <script src="/shared/weapons.js"></script>
+  <script src="/shared/items.js"></script>
   <script src="/shared/physics.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/phaser@3.60.0/dist/phaser.min.js"></script>
   <script src="src/utils/Network.js"></script>

@@ -8,39 +8,71 @@ const { MAP_WIDTH, MAP_HEIGHT, GROUND_MIN_Y, GROUND_MAX_Y, PHYSICS } = require('
 // Поверхность не опускается ниже: танк не должен проваливаться за нижнюю кромку
 const MAX_SURFACE_Y = MAP_HEIGHT - 8;
 
+// Профили карт: seed выбирает один из них, как «стили ландшафта» в классике
+const TERRAIN_STYLES = [
+  { name: 'холмы',   roughness: 0.55, relief: 0.75, smooth: 3 },
+  { name: 'горы',    roughness: 0.70, relief: 1.00, smooth: 2 },
+  { name: 'равнина', roughness: 0.42, relief: 0.40, smooth: 4 },
+  { name: 'скалы',   roughness: 0.78, relief: 0.85, smooth: 1 }
+];
+
 /**
- * Генерация ландшафта: наложение синусоид + шум по seed
+ * Генерация ландшафта методом срединного смещения (1D diamond-square):
+ * даёт рваный самоподобный профиль вместо гладких синусоид, как в оригинале.
+ * Площадки под танки досыпаются отдельно — после выбора точек спавна.
+ *
+ * @param {number} seed
+ * @param {number} [styleIndex] - профиль карты, по умолчанию выводится из seed
  * @returns {number[]} heights[x] = Y поверхности (меньше Y = выше земля)
  */
-function generateTerrain(seed) {
-  const heights = new Array(MAP_WIDTH);
+function generateTerrain(seed, styleIndex) {
   const random = seededRandom(seed);
-
-  const baseHeight = (GROUND_MIN_Y + GROUND_MAX_Y) / 2;
-  const amplitude = (GROUND_MAX_Y - GROUND_MIN_Y) / 2;
-
-  const frequencies = [0.003, 0.01, 0.02, 0.05];
-  const phases = [
-    random() * Math.PI * 2,
-    random() * Math.PI * 2,
-    random() * Math.PI * 2,
-    random() * Math.PI * 2
+  const style = TERRAIN_STYLES[
+    styleIndex !== undefined ? styleIndex % TERRAIN_STYLES.length : seed % TERRAIN_STYLES.length
   ];
-  const amplitudes = [0.6, 0.25, 0.1, 0.05];
 
-  for (let x = 0; x < MAP_WIDTH; x++) {
-    let y = baseHeight;
-    for (let i = 0; i < frequencies.length; i++) {
-      y += Math.sin(x * frequencies[i] + phases[i]) * amplitude * amplitudes[i];
+  const midY = (GROUND_MIN_Y + GROUND_MAX_Y) / 2;
+  const span = (GROUND_MAX_Y - GROUND_MIN_Y) / 2 * style.relief;
+
+  // Размер сетки — степень двойки не меньше ширины карты
+  let size = 1;
+  while (size < MAP_WIDTH) size *= 2;
+
+  const grid = new Float64Array(size + 1);
+  grid[0] = midY + (random() - 0.5) * span;
+  grid[size] = midY + (random() - 0.5) * span;
+
+  let step = size;
+  let amplitude = span;
+
+  while (step > 1) {
+    const half = step / 2;
+    for (let x = half; x < size; x += step) {
+      const avg = (grid[x - half] + grid[x + half]) / 2;
+      grid[x] = avg + (random() - 0.5) * 2 * amplitude;
     }
-    y += (random() - 0.5) * 20;
-    heights[x] = Math.max(GROUND_MIN_Y, Math.min(GROUND_MAX_Y, Math.round(y)));
+    amplitude *= style.roughness;
+    step = half;
   }
 
-  smoothHeights(heights, 2);
-  createSpawnPlatforms(heights);
+  const heights = new Array(MAP_WIDTH);
+  for (let x = 0; x < MAP_WIDTH; x++) {
+    heights[x] = Math.max(GROUND_MIN_Y, Math.min(GROUND_MAX_Y, Math.round(grid[x])));
+  }
+
+  smoothHeights(heights, style.smooth);
+
+  // Карта сразу приводится к естественному углу откоса. Без этого первый же
+  // взрыв запускал crumbleTerrain по всему массиву, и рельеф осыпался
+  // разом по всей карте — далеко от места попадания.
+  // Одного вызова мало: 40 проходов не всегда сходятся на рваном профиле.
+  for (let i = 0; i < 15 && crumbleTerrain(heights); i++);
 
   return heights;
+}
+
+function terrainStyleName(seed) {
+  return TERRAIN_STYLES[seed % TERRAIN_STYLES.length].name;
 }
 
 function seededRandom(seed) {
@@ -61,20 +93,19 @@ function smoothHeights(heights, passes = 1) {
 }
 
 /**
- * Плоские площадки для спавна
+ * Ровные площадки под танки в выбранных точках спавна.
+ * Раньше площадок всегда было четыре в фиксированных местах — независимо
+ * от того, сколько игроков и где они на самом деле стоят.
  */
-function createSpawnPlatforms(heights) {
-  const numPlatforms = 4;
-  const platformWidth = 60;
+function createSpawnPlatforms(heights, positions, platformWidth = 44) {
+  const half = Math.floor(platformWidth / 2);
 
-  for (let i = 0; i < numPlatforms; i++) {
-    const centerX = Math.floor((i + 0.5) * MAP_WIDTH / numPlatforms);
-    const platformY = heights[centerX];
+  for (const centerX of positions) {
+    const cx = Math.max(0, Math.min(MAP_WIDTH - 1, Math.round(centerX)));
+    const platformY = heights[cx];
 
-    for (let x = centerX - platformWidth / 2; x < centerX + platformWidth / 2; x++) {
-      if (x >= 0 && x < MAP_WIDTH) {
-        heights[x] = platformY;
-      }
+    for (let x = cx - half; x <= cx + half; x++) {
+      if (x >= 0 && x < MAP_WIDTH) heights[x] = platformY;
     }
   }
 }
@@ -175,9 +206,10 @@ function crumbleTerrain(heights, maxSlope = PHYSICS.crumbleMaxSlope, passes = PH
 }
 
 /**
- * Позиции спавна: каждая зона карты - своему игроку, ищем ровное место
+ * Позиции спавна: каждая зона карты - своему игроку, ищем ровное место.
+ * Порядок зон перемешивается по seed, иначе первый слот всегда стоит слева.
  */
-function findSpawnPositions(heights, numPlayers) {
+function findSpawnPositions(heights, numPlayers, seed) {
   const positions = [];
 
   for (let i = 0; i < numPlayers; i++) {
@@ -198,6 +230,16 @@ function findSpawnPositions(heights, numPlayers) {
     }
 
     positions.push(bestX);
+  }
+
+  if (seed !== undefined) {
+    // Перемешивание Фишера-Йетса на том же seed: раскладка детерминирована,
+    // но не привязана к порядку слотов
+    const random = seededRandom(seed ^ 0x5f3a);
+    for (let i = positions.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [positions[i], positions[j]] = [positions[j], positions[i]];
+    }
   }
 
   return positions;
@@ -266,6 +308,8 @@ function napalmFlows(heights, startX, stepEvery = 10) {
 
 module.exports = {
   generateTerrain,
+  terrainStyleName,
+  createSpawnPlatforms,
   smoothHeights,
   applyExplosion,
   applyDirtBall,

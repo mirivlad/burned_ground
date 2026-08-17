@@ -9,9 +9,10 @@ const {
   MAP_WIDTH, PHYSICS, GAME, ECONOMY, ROOM, CHAT, SETTINGS_LIMITS, PALETTE
 } = require('./shared/constants');
 const { getWeapon, BASE_WEAPON_ID } = require('./shared/weapons');
+const { getItem } = require('./shared/items');
 const {
   generateTerrain, applyExplosion, applyDirtBall, crumbleTerrain, findSpawnPositions,
-  rollPath, napalmFlows
+  createSpawnPlatforms, terrainStyleName, rollPath, napalmFlows
 } = require('./shared/terrain');
 const {
   calculateProjectileTrajectory,
@@ -291,6 +292,7 @@ class Room {
       isGuest: !!p.isGuest,
       difficulty: p.difficulty || null,
       hp: p.hp,
+      shield: p.shield || 0,
       money: p.money,
       isAlive: p.isAlive,
       connected: p.connected,
@@ -347,6 +349,8 @@ class Room {
       hp: 100,
       money: GAME.startingMoney,
       inventory: { [BASE_WEAPON_ID]: Infinity },
+      items: {},                       // itemId -> количество
+      shield: 0,                       // остаток прочности активного щита
       activeWeaponId: BASE_WEAPON_ID,
       angle: 90,
       power: 70,
@@ -369,6 +373,8 @@ class Room {
       hp: 100,
       money: GAME.startingMoney,
       inventory: { [BASE_WEAPON_ID]: Infinity },
+      items: {},
+      shield: 0,
       activeWeaponId: BASE_WEAPON_ID,
       angle: 90,
       power: 70,
@@ -546,6 +552,8 @@ class Room {
       room: this.roomState(),
       snapshot: this.gameSnapshot(),
       inventory: p.inventory,
+      items: p.items,
+      shield: p.shield,
       activeWeaponId: p.activeWeaponId,
       angle: p.angle,
       power: p.power
@@ -847,6 +855,8 @@ class Room {
       const p = this.players[pid];
       p.money = this.settings.startMoney;
       p.inventory = { [BASE_WEAPON_ID]: Infinity };
+      p.items = {};
+      p.shield = 0;
       p.activeWeaponId = BASE_WEAPON_ID;
       p.kills = 0;
       p.totalEarned = 0;
@@ -880,10 +890,13 @@ class Room {
       p.hp = 100;
       p.isAlive = true;
       p.roundEarned = 0;
+      p.shield = 0;          // новый раунд — новый танк, щит поднимают заново
     }
 
     const ids = this.playerOrderIds();
-    const spawnPositions = findSpawnPositions(this.terrain, ids.length);
+    // Точки спавна выбираются по рельефу, и уже под них ровняются площадки
+    const spawnPositions = findSpawnPositions(this.terrain, ids.length, this.terrainSeed);
+    createSpawnPlatforms(this.terrain, spawnPositions);
 
     this.tanks = ids.map((pid, index) => {
       const p = this.players[pid];
@@ -898,6 +911,7 @@ class Room {
       round: this.round,
       maxRounds: this.config.rounds,
       terrainSeed: this.terrainSeed,
+      terrainStyle: terrainStyleName(this.terrainSeed),
       heights: this.terrain,
       tanks: this.tanks,
       wind: this.wind,
@@ -1173,6 +1187,23 @@ class Room {
     const p = this.players[playerId];
     if (!p || !p.isAlive || damage <= 0) return false;
 
+    // Щит принимает удар первым и уходит в минус только остатком
+    if (p.shield > 0) {
+      const absorbed = Math.min(p.shield, damage);
+      p.shield -= absorbed;
+      damage -= absorbed;
+
+      this.emit('shield_hit', {
+        playerId, absorbed: Math.round(absorbed), shield: Math.round(p.shield),
+        broken: p.shield <= 0
+      });
+
+      if (damage <= 0) {
+        this.emitPlayers();
+        return false;
+      }
+    }
+
     const hpBefore = p.hp;
     p.hp = Math.max(0, p.hp - damage);
     const dealt = hpBefore - p.hp;   // фактически снятые HP (не «перебор» по мертвому танку)
@@ -1218,7 +1249,7 @@ class Room {
     if (!weapon.infinite) {
       p.inventory[weaponId]--;
       if (p.inventory[weaponId] === 0) p.activeWeaponId = BASE_WEAPON_ID;
-      this.emit('inventory_update', { playerId, inventory: p.inventory, activeWeaponId: p.activeWeaponId });
+      this.sendInventory(playerId);
     }
 
     const tank = this.tanks.find(t => t.playerId === playerId);
@@ -1436,9 +1467,20 @@ class Room {
         if (res.landed && res.fallDistance > PHYSICS.fallDamageThreshold) {
           const fallDamage = calculateFallDamage(res.fallDistance);
           if (fallDamage > 0) {
-            this.emit('fall_damage', { playerId: tank.playerId, distance: Math.round(res.fallDistance), damage: fallDamage });
-            // Сброс врага в пропасть — такое же попадание: фраг и деньги стрелявшему
-            this.damagePlayer(tank.playerId, fallDamage, this.lastShooterId || null, 'fall');
+            // Парашют раскрывается сам и полностью гасит падение
+            if (p.items && p.items.parachute > 0) {
+              p.items.parachute--;
+              this.emit('parachute_used', {
+                playerId: tank.playerId,
+                distance: Math.round(res.fallDistance),
+                left: p.items.parachute
+              });
+              this.sendInventory(tank.playerId);
+            } else {
+              this.emit('fall_damage', { playerId: tank.playerId, distance: Math.round(res.fallDistance), damage: fallDamage });
+              // Сброс врага в пропасть — такое же попадание: фраг и деньги стрелявшему
+              this.damagePlayer(tank.playerId, fallDamage, this.lastShooterId || null, 'fall');
+            }
           }
         }
       }
@@ -1471,6 +1513,94 @@ class Room {
   // ПОКУПКИ / ВЫБОР ОРУЖИЯ
   // ============================================
 
+  /** Единая рассылка инвентаря: снаряды, снаряжение и щит */
+  sendInventory(playerId) {
+    const p = this.players[playerId];
+    if (!p) return;
+
+    this.emit('inventory_update', {
+      playerId,
+      inventory: p.inventory,
+      items: p.items,
+      shield: p.shield,
+      activeWeaponId: p.activeWeaponId
+    });
+  }
+
+  buyItem(playerId, itemId) {
+    const p = this.players[playerId];
+    const item = getItem(itemId);
+    if (!p || !item) return;
+    if (this.phase !== 'playing' && this.phase !== 'interRound') return;
+    if (item.price > p.money) {
+      this.emitTo(playerId, 'error', { message: 'Не хватает денег' });
+      return;
+    }
+
+    p.money -= item.price;
+    p.items[itemId] = (p.items[itemId] || 0) + (item.packSize || 1);
+
+    // Щит поднимается сразу при покупке, если действующего нет
+    if (item.kind === 'shield' && item.auto && p.shield <= 0) {
+      p.items[itemId]--;
+      p.shield = item.strength;
+      this.emit('shield_up', { playerId, shield: p.shield });
+    }
+
+    this.emit('money_update', { playerId, amount: -item.price, reason: `buy_${itemId}` });
+    this.sendInventory(playerId);
+    this.emitPlayers();
+  }
+
+  /**
+   * Ручное применение: ремкомплект и поднятие купленного щита.
+   * Только в свой ход и до выстрела — иначе предмет спасал бы уже
+   * после того, как снаряд лег.
+   */
+  useItem(playerId, itemId) {
+    const p = this.players[playerId];
+    const item = getItem(itemId);
+    if (!p || !item || !p.isAlive) return;
+    if (!(p.items[itemId] > 0)) return;
+
+    if (this.phase !== 'playing' || this.turnPhase !== 'aiming' ||
+        this.playerOrderIds()[this.currentPlayerIndex] !== playerId) {
+      this.emitTo(playerId, 'error', { message: 'Снаряжение применяется в свой ход' });
+      return;
+    }
+
+    if (item.kind === 'repair') {
+      if (p.hp >= 100) {
+        this.emitTo(playerId, 'error', { message: 'Броня целая' });
+        return;
+      }
+      p.items[itemId]--;
+      p.hp = Math.min(100, p.hp + item.heal);
+      this.emit('hp_update', { playerId, hp: p.hp, damage: 0, cause: 'repair' });
+      this.emit('item_used', { playerId, itemId, name: item.name });
+    } else if (item.kind === 'shield') {
+      if (p.shield > 0) {
+        this.emitTo(playerId, 'error', { message: 'Щит уже поднят' });
+        return;
+      }
+      p.items[itemId]--;
+      p.shield = item.strength;
+      this.emit('shield_up', { playerId, shield: p.shield });
+      this.emit('item_used', { playerId, itemId, name: item.name });
+    } else {
+      return;   // парашют срабатывает сам
+    }
+
+    this.sendInventory(playerId);
+    this.emitPlayers();
+  }
+
+  emitTo(playerId, event, data) {
+    const p = this.players[playerId];
+    const socket = p && p.socketId ? this.io.sockets.sockets.get(p.socketId) : null;
+    if (socket) socket.emit(event, data);
+  }
+
   buyWeapon(playerId, weaponId) {
     const p = this.players[playerId];
     const weapon = getWeapon(weaponId);
@@ -1482,7 +1612,7 @@ class Room {
     // Некоторые снаряды продаются пачками (Smoke Tracer)
     p.inventory[weaponId] = (p.inventory[weaponId] || 0) + (weapon.packSize || 1);
 
-    this.emit('inventory_update', { playerId, inventory: p.inventory, activeWeaponId: p.activeWeaponId });
+    this.sendInventory(playerId);
     this.emit('money_update', { playerId, amount: -weapon.price, reason: `buy_${weaponId}` });
     this.emitPlayers();
   }
@@ -1496,9 +1626,8 @@ class Room {
       p.activeWeaponId = weaponId;
     } else {
       p.activeWeaponId = BASE_WEAPON_ID;
-      weaponId = BASE_WEAPON_ID;
     }
-    this.emit('inventory_update', { playerId, inventory: p.inventory, activeWeaponId: weaponId });
+    this.sendInventory(playerId);
   }
 
   // ============================================

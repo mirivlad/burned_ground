@@ -20,12 +20,21 @@
    * Система углов: 0° = влево, 90° = вверх, 180° = вправо.
    * @returns {Object[]} массив позиций по тикам, последний элемент — точка падения
    */
+  /**
+   * Скорость снаряда пропорциональна мощности: 0 — снаряд падает под ноги,
+   * 100 — максимальная дальность. Раньше при нулевой мощности снаряд все
+   * равно улетал с базовой скоростью 15, и ближний навес был невозможен.
+   */
+  function speedFromPower(power) {
+    const p = Math.max(0, Math.min(100, Number(power) || 0));
+    return Math.max(PH.projectileMinSpeed, (p / 100) * PH.projectileMaxSpeed);
+  }
+
   function calculateProjectileTrajectory({ startX, startY, angle, power, wind, heights }) {
     const trajectory = [];
 
     const angleRad = (angle * Math.PI) / 180;
-    const baseSpeed = 15;
-    const speed = baseSpeed + (power / 100) * 20;
+    const speed = speedFromPower(power);
 
     let vx = -Math.cos(angleRad) * speed;
     let vy = -Math.sin(angleRad) * speed;
@@ -173,7 +182,7 @@
    */
   function simulateMirv({ startX, startY, angle, power, wind, heights }) {
     const angleRad = (angle * Math.PI) / 180;
-    const speed = 15 + (power / 100) * 20;
+    const speed = speedFromPower(power);
 
     let vx = -Math.cos(angleRad) * speed;
     let vy = -Math.sin(angleRad) * speed;
@@ -226,6 +235,7 @@
   }
 
   const PhysicsAPI = {
+    speedFromPower,
     calculateProjectileTrajectory,
     calculateExplosionDamage,
     calculateFallDamage,

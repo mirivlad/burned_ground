@@ -38,6 +38,9 @@ class GameScene extends Phaser.Scene {
     net.on('tank_update', (d) => this.handleTankUpdate(d));
     net.on('players_update', (d) => this.handlePlayersUpdate(d));
     net.on('hp_update', (d) => this.handleHpUpdate(d));
+    net.on('shield_up', (d) => this.handleShieldUp(d));
+    net.on('shield_hit', (d) => this.handleShieldHit(d));
+    net.on('parachute_used', (d) => this.handleParachute(d));
     net.on('fall_damage', (d) => this.handleFallDamage(d));
     net.on('death', (d) => this.handleDeath(d));
     net.on('round_end', () => {
@@ -464,6 +467,7 @@ class GameScene extends Phaser.Scene {
       const tank = this.tanks[p.id];
       if (tank) {
         tank.setHp(p.hp);
+        tank.setShield(p.shield || 0);
         tank.setAlive(p.isAlive);
       }
     });
@@ -473,6 +477,55 @@ class GameScene extends Phaser.Scene {
     const tank = this.tanks[data.playerId];
     if (tank) tank.setHp(data.hp);
     if (this.players[data.playerId]) this.players[data.playerId].hp = data.hp;
+  }
+
+  handleShieldUp(data) {
+    const tank = this.tanks[data.playerId];
+    if (!tank) return;
+
+    tank.setShield(data.shield);
+
+    // Вспышка купола при поднятии
+    const dome = this.add.circle(tank.x, tank.y - 4, 10, 0x55ffff, 0);
+    dome.setStrokeStyle(2, 0x55ffff, 0.9);
+    this.tweens.add({
+      targets: dome,
+      radius: 32,
+      alpha: 0,
+      duration: 450,
+      onComplete: () => dome.destroy()
+    });
+  }
+
+  handleShieldHit(data) {
+    const tank = this.tanks[data.playerId];
+    if (!tank) return;
+
+    tank.setShield(data.shield);
+    this.showFloatingText(tank.x, tank.y - 46, `ЩИТ -${data.absorbed}`, '#55ffff');
+
+    if (data.broken) {
+      // Осколки купола
+      for (let i = 0; i < 8; i++) {
+        const ang = Math.PI + Math.random() * Math.PI;
+        const shard = this.add.circle(tank.x + Math.cos(ang) * 20, tank.y - 4 + Math.sin(ang) * 20, 2, 0x55ffff);
+        this.tweens.add({
+          targets: shard,
+          x: shard.x + Math.cos(ang) * 30,
+          y: shard.y + Math.sin(ang) * 30,
+          alpha: 0,
+          duration: 500,
+          onComplete: () => shard.destroy()
+        });
+      }
+    }
+  }
+
+  handleParachute(data) {
+    const tank = this.tanks[data.playerId];
+    if (tank) {
+      this.showFloatingText(tank.x, tank.y - 40, 'ПАРАШЮТ', '#ffffff');
+    }
   }
 
   handleFallDamage(data) {

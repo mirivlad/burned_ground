@@ -11,6 +11,8 @@ class UIScene extends Phaser.Scene {
     this.players = {};
     this.roomState = null;
     this.inventory = { baby_missile: Infinity };
+    this.items = {};
+    this.shield = 0;
     this.activeWeaponId = 'baby_missile';
     this.money = 500;
     this.currentPlayerId = null;
@@ -292,6 +294,8 @@ class UIScene extends Phaser.Scene {
         }
         if (d.inventory) {
           this.inventory = d.inventory;
+          this.items = d.items || {};
+          this.shield = d.shield || 0;
           this.activeWeaponId = d.activeWeaponId || 'baby_missile';
           this.updateInventoryDisplay();
         }
@@ -337,9 +341,42 @@ class UIScene extends Phaser.Scene {
     net.on('inventory_update', (d) => {
       if (d.playerId === window.network.playerId) {
         this.inventory = d.inventory || this.inventory;
+        if (d.items) this.items = d.items;
+        if (d.shield !== undefined) this.shield = d.shield;
         if (d.activeWeaponId) this.activeWeaponId = d.activeWeaponId;
         this.updateInventoryDisplay();
+        this.updateShopDisplay();
       }
+    });
+
+    net.on('shield_up', (d) => {
+      if (d.playerId === window.network.playerId) {
+        this.shield = d.shield;
+        this.updateInventoryDisplay();
+      }
+      const p = this.players[d.playerId];
+      if (p) this.showMessage(`${p.name}: щит поднят (${d.shield})`);
+    });
+
+    net.on('shield_hit', (d) => {
+      if (d.playerId === window.network.playerId) {
+        this.shield = d.shield;
+        this.updateInventoryDisplay();
+      }
+      if (d.broken) {
+        const p = this.players[d.playerId];
+        if (p) this.showMessage(`${p.name}: щит разрушен`);
+      }
+    });
+
+    net.on('parachute_used', (d) => {
+      const p = this.players[d.playerId];
+      if (p) this.showMessage(`${p.name}: парашют раскрыт, падение с ${d.distance}px без урона`);
+    });
+
+    net.on('item_used', (d) => {
+      const p = this.players[d.playerId];
+      if (p) this.showMessage(`${p.name} применяет: ${d.name}`);
     });
     net.on('death', (d) => this.handleDeath(d));
     net.on('round_end', (d) => this.handleRoundEnd(d));
@@ -864,6 +901,8 @@ class UIScene extends Phaser.Scene {
     this.round = 0;
     this.money = this.players[window.network.playerId]?.money ?? 500;
     this.inventory = { baby_missile: Infinity };
+    this.items = {};
+    this.shield = 0;
     this.activeWeaponId = 'baby_missile';
 
     this.updateMoneyDisplay();
@@ -1124,14 +1163,21 @@ class UIScene extends Phaser.Scene {
     if (window.network.isSpectator()) return;
 
     const weapons = Object.values(window.WEAPONS || {}).filter(w => !w.infinite);
+    const items = Object.values(window.ITEMS || {});
 
-    this.shopGrid.innerHTML = weapons.map(weapon => {
+    const weaponCards = weapons.map(weapon => {
       const pack = weapon.packSize ? `<span class="card-pack">×${weapon.packSize} за покупку</span>` : '';
       const desc = weapon.effect === 'add_earth'
         ? 'Создает холм земли: закопать себя или поставить стену врагу'
         : weapon.effect === 'smoke'
           ? 'Пристрелочный дым: без урона и кратера, след остается до следующего выстрела'
-          : `Урон: ${weapon.damage} · Радиус: ${weapon.radius}`;
+          : weapon.effect === 'roller'
+            ? `Урон ${weapon.damage} · катится по склону в низину`
+            : weapon.effect === 'mirv'
+              ? `Урон ${weapon.damage} на боеголовку · распад на 3 в апексе`
+              : weapon.effect === 'napalm'
+                ? `Урон ${weapon.damage} на очаг · растекается по склону`
+                : `Урон: ${weapon.damage} · Радиус: ${weapon.radius}`;
 
       return `
         <div class="shop-card" data-weapon="${weapon.id}">
@@ -1146,11 +1192,40 @@ class UIScene extends Phaser.Scene {
       `;
     }).join('');
 
-    this.shopGrid.querySelectorAll('.card-buy').forEach(btn => {
+    const itemCards = items.map(item => {
+      const pack = item.packSize ? `<span class="card-pack">×${item.packSize} за покупку</span>` : '';
+      return `
+        <div class="shop-card item-card" data-item="${item.id}">
+          <div class="card-top">
+            <span class="card-name">${item.name} ${pack}</span>
+            <span class="card-price">$${item.price}</span>
+          </div>
+          <div class="card-desc">${item.description}</div>
+          <div class="card-owned" data-owned-item="${item.id}">в наличии: 0</div>
+          <button class="card-buy" data-buy-item="${item.id}">КУПИТЬ</button>
+        </div>
+      `;
+    }).join('');
+
+    this.shopGrid.innerHTML =
+      `<div class="shop-section">// СНАРЯДЫ</div>${weaponCards}` +
+      `<div class="shop-section">// СНАРЯЖЕНИЕ</div>${itemCards}`;
+
+    this.shopGrid.querySelectorAll('.card-buy[data-buy]').forEach(btn => {
       btn.addEventListener('click', () => {
         const weapon = window.WEAPONS[btn.dataset.buy];
         if (weapon && weapon.price <= this.money) {
           window.network.buyWeapon(btn.dataset.buy);
+          window.sound?.coin();
+        }
+      });
+    });
+
+    this.shopGrid.querySelectorAll('.card-buy[data-buy-item]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const item = window.ITEMS[btn.dataset.buyItem];
+        if (item && item.price <= this.money) {
+          window.network.buyItem(btn.dataset.buyItem);
           window.sound?.coin();
         }
       });
@@ -1166,11 +1241,19 @@ class UIScene extends Phaser.Scene {
 
     this.shopGrid.querySelectorAll('.shop-card').forEach(card => {
       const weapon = window.WEAPONS[card.dataset.weapon];
-      if (!weapon) return;
-      const owned = this.inventory[weapon.id] || 0;
-      card.classList.toggle('too-expensive', weapon.price > this.money);
+      const item = window.ITEMS ? window.ITEMS[card.dataset.item] : null;
+      const goods = weapon || item;
+      if (!goods) return;
 
-      const ownedEl = card.querySelector(`[data-owned="${weapon.id}"]`);
+      card.classList.toggle('too-expensive', goods.price > this.money);
+
+      const owned = weapon
+        ? (this.inventory[weapon.id] || 0)
+        : (this.items[item.id] || 0);
+
+      const ownedEl = card.querySelector(
+        weapon ? `[data-owned="${goods.id}"]` : `[data-owned-item="${goods.id}"]`
+      );
       if (ownedEl) ownedEl.textContent = `в наличии: ${owned}`;
     });
   }
@@ -1183,8 +1266,9 @@ class UIScene extends Phaser.Scene {
     if (!this.inventoryList) return;
 
     const weapons = window.WEAPONS || {};
+    const itemDefs = window.ITEMS || {};
 
-    const items = Object.entries(this.inventory).map(([weaponId, count]) => {
+    const shells = Object.entries(this.inventory).map(([weaponId, count]) => {
       const weapon = weapons[weaponId];
       if (!weapon) return '';
 
@@ -1200,14 +1284,43 @@ class UIScene extends Phaser.Scene {
       `;
     }).filter(Boolean).join('');
 
-    this.inventoryList.innerHTML = items;
+    // Снаряжение: парашют срабатывает сам, щит и ремкомплект применяются кликом
+    const gear = Object.entries(this.items).map(([itemId, count]) => {
+      const def = itemDefs[itemId];
+      if (!def || !(count > 0)) return '';
 
-    this.inventoryList.querySelectorAll('.inventory-item').forEach(item => {
+      const usable = def.kind !== 'parachute';
+      return `
+        <div class="inventory-item gear-item ${usable ? 'usable' : ''}" data-item="${itemId}"
+             title="${usable ? 'Применить в свой ход' : 'Раскрывается автоматически'}">
+          <span class="weapon-name">${def.name}</span>
+          <span class="weapon-count">${count}</span>
+        </div>
+      `;
+    }).filter(Boolean).join('');
+
+    const shieldLine = this.shield > 0
+      ? `<div class="inventory-item shield-line">
+           <span class="weapon-name">Щит поднят</span>
+           <span class="weapon-count">${Math.round(this.shield)}</span>
+         </div>`
+      : '';
+
+    this.inventoryList.innerHTML = shells + shieldLine + gear;
+
+    this.inventoryList.querySelectorAll('.inventory-item[data-weapon]').forEach(item => {
       item.addEventListener('click', () => {
         if (item.classList.contains('out-of-stock')) return;
         this.activeWeaponId = item.dataset.weapon;
         window.network.selectWeapon(this.activeWeaponId);
         this.updateInventoryDisplay();
+      });
+    });
+
+    this.inventoryList.querySelectorAll('.inventory-item[data-item]').forEach(item => {
+      item.addEventListener('click', () => {
+        if (!item.classList.contains('usable')) return;
+        window.network.useItem(item.dataset.item);
       });
     });
   }

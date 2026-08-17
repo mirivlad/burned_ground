@@ -13,6 +13,7 @@ class Tank {
     this.name = name || '';
     this.angle = 90;
     this.hp = 100;
+    this.shield = 0;
     this.isAlive = true;
     this.isCurrent = false;
 
@@ -100,6 +101,16 @@ class Tank {
     g.lineTo(bx, by);
     g.strokePath();
 
+    // Купол щита: полукруг над танком, ярче при большем запасе прочности
+    if (this.shield > 0) {
+      const radius = this.width * 0.85;
+      const strength = Math.min(1, this.shield / 100);
+      g.lineStyle(2, 0x55ffff, 0.35 + strength * 0.5);
+      g.beginPath();
+      g.arc(this.x, this.y - 4, radius, Math.PI, Math.PI * 2, false);
+      g.strokePath();
+    }
+
     // Индикатор текущего игрока — белая рамка
     if (this.isCurrent) {
       g.lineStyle(1, 0xffffff, 0.8);
@@ -134,6 +145,14 @@ class Tank {
   setHp(hp) {
     if (this.hp !== hp) {
       this.hp = hp;
+      this.draw();
+    }
+  }
+
+  setShield(shield) {
+    const value = Math.max(0, Number(shield) || 0);
+    if (this.shield !== value) {
+      this.shield = value;
       this.draw();
     }
   }

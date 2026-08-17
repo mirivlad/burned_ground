@@ -301,6 +301,14 @@ io.on('connection', (socket) => {
     if (socket.playerId) room.selectWeapon(socket.playerId, weaponId);
   }));
 
+  socket.on('buy_item', inRoom((room, { itemId } = {}) => {
+    if (socket.playerId) room.buyItem(socket.playerId, itemId);
+  }));
+
+  socket.on('use_item', inRoom((room, { itemId } = {}) => {
+    if (socket.playerId) room.useItem(socket.playerId, itemId);
+  }));
+
   socket.on('fire', inRoom((room, data = {}) => {
     const playerId = socket.playerId;
     if (!playerId || !room.players[playerId]) return;

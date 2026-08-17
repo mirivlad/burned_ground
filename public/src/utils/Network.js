@@ -128,6 +128,7 @@ class Network {
     [
       'room_launched', 'host_changed', 'inter_round', 'special_update',
       'chat_message', 'chat_history',
+      'shield_hit', 'shield_up', 'parachute_used', 'item_used',
       'match_start', 'round_start', 'turn_start', 'turn_timeout',
       'shot', 'explosion', 'terrain_update', 'tank_update', 'players_update',
       'hp_update', 'death', 'fall_damage', 'player_disconnected',
@@ -286,6 +287,14 @@ class Network {
 
   selectWeapon(weaponId) {
     this.socket.emit('select_weapon', { weaponId });
+  }
+
+  buyItem(itemId) {
+    this.socket.emit('buy_item', { itemId });
+  }
+
+  useItem(itemId) {
+    this.socket.emit('use_item', { itemId });
   }
 
   fire(angle, power, weaponId) {

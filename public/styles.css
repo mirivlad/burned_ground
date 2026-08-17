@@ -241,6 +241,29 @@ input[type="text"]::placeholder { color: #3a5a42; text-transform: uppercase; }
 
 #chat-panel .chat-log { height: 96px; }
 
+/* Магазин: секции снарядов и снаряжения */
+.shop-section {
+  grid-column: 1 / -1;
+  font-size: 11px; color: #4a7a56; letter-spacing: 3px;
+  margin-top: 6px; border-bottom: 1px solid #1e3d26; padding-bottom: 4px;
+}
+.shop-card.item-card { border-color: #2d5a5a; }
+.shop-card.item-card .card-name { color: #55ffff; }
+
+/* Снаряжение в инвентаре */
+.inventory-item.gear-item { border-left: 3px solid #2d5a5a; }
+.inventory-item.gear-item.usable { cursor: pointer; }
+.inventory-item.gear-item.usable:hover { background: rgba(85,255,255,0.12); }
+.inventory-item.shield-line { color: #55ffff; border-left: 3px solid #55ffff; cursor: default; }
+
+/* Числовой ввод угла и мощности */
+#angle-control input[type="number"],
+#power-control input[type="number"] {
+  width: 56px; padding: 1px 4px; font-size: 12px;
+  background: #020402; color: #ffd24a; border: 1px solid #2d5237;
+  font-family: 'Courier New', monospace;
+}
+
 #entry-hint { text-align: center; font-size: 10px; color: #3a5a42; margin-top: 12px; letter-spacing: 1px; }
 
 .lobby-label { font-size: 11px; color: #4a7a56; letter-spacing: 2px; margin: 8px 0 6px; }
