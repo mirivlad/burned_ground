@@ -3,6 +3,10 @@
  * Логика авторитетна на сервере; сцена отрисовывает события комнаты.
  */
 
+// Порядок отрисовки: небо -> танки -> грунт -> эффекты -> интерфейс.
+// Грунт выше танков, чтобы засыпанная землей машина скрывалась под ней.
+const DEPTH = { sky: -10, tanks: 0, terrain: 1, effects: 6, hud: 8 };
+
 class GameScene extends Phaser.Scene {
   constructor() {
     super({ key: 'GameScene' });
@@ -80,6 +84,7 @@ class GameScene extends Phaser.Scene {
     const len = Math.round((Math.abs(wind) / maxWind) * 55);
 
     this.windGfx = this.add.graphics();
+    this.windGfx.setDepth(DEPTH.hud);
     this.windGfx.fillStyle(0x001006, 0.82);
     this.windGfx.fillRect(cx - 120, y - 16, 240, 54);
     this.windGfx.lineStyle(1, 0x66ff66, 0.75);
@@ -118,6 +123,7 @@ class GameScene extends Phaser.Scene {
       strokeThickness: 2
     });
     this.windText.setOrigin(0.5);
+    this.windText.setDepth(DEPTH.hud);
   }
 
   buildWorld({ terrainSeed, heights, tanks, players }) {
@@ -191,6 +197,7 @@ class GameScene extends Phaser.Scene {
     if (!points || points.length < 2) return null;
 
     const dot = this.add.circle(points[0].x, points[0].y, radius, colorNum);
+    dot.setDepth(DEPTH.effects);
     const shot = {
       points,
       stepMs,
@@ -349,9 +356,10 @@ class GameScene extends Phaser.Scene {
 
     const isSmoke = weaponId === 'smoke_tracer';
 
-    if (isSmoke) this.aimTrail = this.add.graphics();
+    if (isSmoke) { this.aimTrail = this.add.graphics(); this.aimTrail.setDepth(DEPTH.effects); }
 
     const trail = isSmoke ? this.aimTrail : this.add.graphics();
+    trail.setDepth(DEPTH.effects);
 
     // Длительность берем из события сервера: он же по ней отсчитывает момент
     // попадания. Локальная траектория может отличаться на точку-другую, если
@@ -393,6 +401,7 @@ class GameScene extends Phaser.Scene {
     if (isDirt) {
       // Холм земли: коричневое пятно + комья
       const blob = this.add.circle(x, y, 2, 0x8b5a2b);
+      blob.setDepth(DEPTH.effects);
       this.tweens.add({
         targets: blob,
         radius: r,
@@ -414,6 +423,7 @@ class GameScene extends Phaser.Scene {
 
     rings.forEach(({ color, delay, size }) => {
       const ring = this.add.circle(x, y, 4, color);
+      ring.setDepth(DEPTH.effects);
       ring.setStrokeStyle(4, color, 1);
       ring.setFillStyle();
       this.time.delayedCall(delay, () => {
@@ -430,6 +440,7 @@ class GameScene extends Phaser.Scene {
 
     // Ядро вспышки
     const core = this.add.circle(x, y, 3, 0xffffff);
+    core.setDepth(DEPTH.effects);
     this.tweens.add({
       targets: core,
       radius: r * 0.5,
@@ -465,6 +476,7 @@ class GameScene extends Phaser.Scene {
       const px = x + Math.cos(ang) * dist;
       const py = y + Math.sin(ang) * dist - 10;
       const chunk = this.add.circle(px, py, 2 + Math.random() * 3, color);
+      chunk.setDepth(DEPTH.effects);
       this.tweens.add({
         targets: chunk,
         y: py + 40 + Math.random() * 50,
@@ -482,6 +494,7 @@ class GameScene extends Phaser.Scene {
       const px = x + (Math.random() - 0.5) * r;
       const py = y + (Math.random() - 0.5) * r * 0.6;
       const puff = this.add.circle(px, py, 3 + Math.random() * 4, 0x555555);
+      puff.setDepth(DEPTH.effects);
       this.tweens.add({
         targets: puff,
         y: py - 25 - Math.random() * 35,
@@ -640,6 +653,7 @@ class GameScene extends Phaser.Scene {
       strokeThickness: 3
     });
     label.setOrigin(0.5);
+    label.setDepth(DEPTH.hud);
 
     this.tweens.add({
       targets: label,

@@ -106,7 +106,7 @@
    * @returns {{moved: boolean, landed: boolean, fallDistance: number, stabilized: boolean}}
    */
   function updateTankPhysics(tank, heights) {
-    const result = { moved: false, landed: false, fallDistance: 0, stabilized: false };
+    const result = { moved: false, landed: false, fallDistance: 0, stabilized: false, buried: false };
 
     if (tank.isAlive === false) return result;
 
@@ -127,21 +127,31 @@
         result.landed = true;
       }
     } else {
-      // На земле: прижимаем к поверхности
+      // На земле: прижимаем к поверхности, но только сверху вниз.
+      // Земля, насыпанная сверху (Dirt Ball, Ton of Dirt), не выталкивает
+      // танк на склон кучи — он остается под ней и должен откапываться.
       const xi = Math.max(0, Math.min(heights.length - 1, Math.floor(tank.x)));
-      if (tank.y !== heights[xi]) {
-        tank.y = heights[xi];
+      const groundY = heights[xi];
+      const buried = tank.y > groundY + PH.buriedThreshold;
+
+      if (!buried && tank.y !== groundY) {
+        tank.y = groundY;
         result.moved = true;
       }
       tank.velocityY = 0;
+      result.buried = buried;
 
-      // Скатывание по склону
-      const slope = checkSlope(tank, heights);
-      if (slope.shouldSlide) {
-        tank.x += slope.direction;
-        result.moved = true;
-      } else {
+      // Засыпанный танк зажат грунтом и никуда не съезжает
+      if (buried) {
         result.stabilized = true;
+      } else {
+        const slope = checkSlope(tank, heights);
+        if (slope.shouldSlide) {
+          tank.x += slope.direction;
+          result.moved = true;
+        } else {
+          result.stabilized = true;
+        }
       }
     }
 

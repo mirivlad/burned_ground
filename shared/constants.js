@@ -31,6 +31,7 @@
     stabilizationTimeoutMs: 6000,
     crumbleMaxSlope: 3,              // осыпание: макс. перепад между соседними колонками
     crumblePasses: 40,
+    buriedThreshold: 3,              // грунт выше кромки корпуса = танк засыпан
     fallDamageThreshold: 50,         // падение ниже порога безвредно
     fallDamageFactor: 0.5            // урон за пиксель сверх порога (250px = 100 урона)
   };

@@ -1539,6 +1539,7 @@ class Room {
         const res = updateTankPhysics(tank, this.terrain);
         p.x = tank.x;
         p.y = tank.y;
+        tank.buried = !!res.buried;
 
         if (res.moved) anyMoving = true;
 

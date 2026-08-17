@@ -10,6 +10,10 @@ class Terrain {
     this.heights = heights || [];
     this.speckles = [];
     this.graphics = scene.add.graphics();
+    // Грунт рисуется поверх танков: засыпанный землей танк должен скрываться
+    // под ней, а не стоять на склоне кучи. Танк над поверхностью не закрывается —
+    // земля залита только вниз от линии рельефа.
+    this.graphics.setDepth(1);
 
     this.generateSpeckles();
     this.draw();
@@ -20,20 +24,33 @@ class Terrain {
     this.draw();
   }
 
+  /**
+   * Крапинка в толще земли. Значения детерминированы по X, чтобы не мерцать
+   * при перерисовках после взрывов, но берутся из целочисленного хеша:
+   * прежние формулы вида (x * 31 + k * 17) % 60 давали одинаковый шаг на
+   * каждой колонке, и крапинка складывалась в диагональные полосы.
+   */
   generateSpeckles() {
     const SPECKLE_COLORS = [0x8a6f44, 0x7d6538, 0x6e5730];
     const speckles = [];
 
+    const hash = (a, b) => {
+      let h = Math.imul(a + 1, 374761393) + Math.imul(b + 1, 668265263);
+      h = Math.imul(h ^ (h >>> 13), 1274126177);
+      return (h ^ (h >>> 16)) >>> 0;
+    };
+
     for (let x = 0; x < this.heights.length; x += 3) {
-      const n = 1 + ((x * 7919) % 3);
+      const n = 1 + (hash(x, 0) % 3);
       for (let k = 0; k < n; k++) {
-        const depth = 6 + ((x * 31 + k * 17) % 60);
+        const h = hash(x, k + 1);
+        const depth = 6 + (h % 60);
         const y = this.heights[x] + depth;
         if (y < 720) {
           speckles.push({
-            x: x + ((x * 13 + k * 7) % 3),
+            x: x + ((h >>> 8) % 3),
             y,
-            color: SPECKLE_COLORS[(x + k) % SPECKLE_COLORS.length]
+            color: SPECKLE_COLORS[(h >>> 16) % SPECKLE_COLORS.length]
           });
         }
       }

@@ -55,9 +55,24 @@ function generateTerrain(seed, styleIndex) {
     step = half;
   }
 
+  // Срединное смещение — случайное блуждание: без нормализации профиль
+  // целиком уезжает вверх или вниз, и карта получается то сплошной стеной,
+  // то узкой полоской земли под пустым небом. Вписываем его в игровую полосу.
+  let min = Infinity;
+  let max = -Infinity;
+  for (let x = 0; x < MAP_WIDTH; x++) {
+    if (grid[x] < min) min = grid[x];
+    if (grid[x] > max) max = grid[x];
+  }
+
+  const rawSpan = (max - min) || 1;
+  const targetSpan = (GROUND_MAX_Y - GROUND_MIN_Y) * style.relief * 0.7;
+  const targetTop = midY - targetSpan / 2;
+
   const heights = new Array(MAP_WIDTH);
   for (let x = 0; x < MAP_WIDTH; x++) {
-    heights[x] = Math.max(GROUND_MIN_Y, Math.min(GROUND_MAX_Y, Math.round(grid[x])));
+    const normalized = targetTop + ((grid[x] - min) / rawSpan) * targetSpan;
+    heights[x] = Math.max(GROUND_MIN_Y, Math.min(GROUND_MAX_Y, Math.round(normalized)));
   }
 
   smoothHeights(heights, style.smooth);
