@@ -256,6 +256,15 @@ input[type="text"]::placeholder { color: #3a5a42; text-transform: uppercase; }
 
 #entry-hint { text-align: center; font-size: 10px; color: #3a5a42; margin-top: 12px; letter-spacing: 1px; }
 
+#entry-legal {
+  text-align: center; font-size: 10px; color: #2f4a37;
+  margin-top: 10px; padding-top: 8px; line-height: 1.6;
+  border-top: 1px solid #14251a;
+}
+#entry-legal b { color: #3a5a42; }
+#entry-legal a { color: #4a7a56; text-decoration: underline; }
+#entry-legal a:hover { color: #66ff66; }
+
 .lobby-label { font-size: 11px; color: #4a7a56; letter-spacing: 2px; margin: 8px 0 6px; }
 
 /* Палитра цветов */

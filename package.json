@@ -2,6 +2,12 @@
   "name": "burned-ground",
   "version": "1.0.0",
   "description": "Turn-based artillery strategy game with destructible terrain",
+  "license": "AGPL-3.0-only",
+  "author": "mirivlad",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mirivlad/burned_ground.git"
+  },
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
